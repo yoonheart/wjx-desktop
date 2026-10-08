@@ -9,7 +9,6 @@
 > **⚠️ 非商用声明 Non-Commercial Notice：本软件仅供个人免费使用，禁止任何形式的商业售卖、
 > 转卖、套壳换皮重新发布（详见 [LICENSE](LICENSE)）。发现闲鱼/淘宝等渠道倒卖请告知作者，感谢！**
 
-[![Release](https://img.shields.io/github/v/release/YoonHeart/wjx-desktop?color=e95f6d)](../../releases/latest)
 ![Platform](https://img.shields.io/badge/Windows-10%2F11%20x64-0078D6)
 ![Java](https://img.shields.io/badge/Java-17-e95f6d)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB)
@@ -201,4 +200,4 @@ If this tool helped you, buying me a milk tea is appreciated — completely opti
 
 <p align="center">
   <img src="src/main/resources/static/pictures/a.png" width="220" alt="微信收款码 / WeChat QR">
-</p>
+</p>![img](https://img.shields.io/github/v/release/YoonHeart/wjx-desktop?color=e95f6d)
