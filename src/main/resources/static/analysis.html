@@ -177,6 +177,16 @@
         <button type="button" class="close" aria-label="关闭">&times;</button>
         <div class="modal-title">功能详细设置</div>
 
+        <!-- 代理错误提示（开刷时校验失败动态显示，位于 ip代理行上方） -->
+        <div id="proxyErrorBox" class="is-hidden">
+            <div class="proxy-error-text">
+                您需要输入ip代理链接
+                <button type="button" id="proxyHelpBtn" class="btn btn-sm btn-link proxy-help-btn">
+                    如何获取ip代理
+                </button>
+            </div>
+        </div>
+
         <!-- ip代理 -->
         <div class="setting-row">
             <div class="form-check form-switch">
@@ -223,6 +233,61 @@
             </span>
         </div>
     </div>
+</div>
+
+<!-- 如何获取 ip 代理 引导弹窗 -->
+<div id="proxyHelpModal" class="modal">
+    <div class="modal-content modal-content--usage">
+        <button type="button" class="close" aria-label="关闭">&times;</button>
+        <div class="modal-title">如何获取 IP 代理</div>
+
+        <div class="modal-body">
+            <p>因为问卷星风控，同一个 IP 最多只能刷 12 份问卷，所以想要大量刷问卷，就需要代理 IP。</p>
+            <p>所谓「代理 IP 提取链接」，就是一个链接，访问它会返回类似下面的内容：</p>
+            <div class="proxy-example">14.116.214.89:44937</div>
+            <p>把这个链接粘贴到「ip代理」输入框，脚本每次填问卷前都会访问它拿到一个新 IP。</p>
+            <p>下面以 <strong>51 代理</strong>为例（没有广告，用这个是因为注册会送 20 元体验金，差不多可以刷几万份问卷）：</p>
+
+            <h6>1. 打开 51 代理网址：https://www.51daili.com/ 然后点击免费注册</h6>
+            <img class="tutorial-img" src="static/pictures/test/1.png"
+                 alt="51代理官网免费注册" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>2. 按照要求填写信息注册</h6>
+            <img class="tutorial-img" src="static/pictures/test/2.png"
+                 alt="填写信息注册" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>3. 因为国家对代理IP安全比较重视，所以需要先实名认证</h6>
+            <img class="tutorial-img" src="static/pictures/test/3.png"
+                 alt="实名认证" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>4. 点击白名单，查看红圈这里的IP地址，将地址填入框里，然后点击添加IP</h6>
+            <img class="tutorial-img" src="static/pictures/test/4.png"
+                 alt="添加白名单" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>5. 点击API提取</h6>
+            <img class="tutorial-img" src="static/pictures/test/5.png"
+                 alt="API提取" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>6. 套餐选送的20积分，提取数量1，使用时长统一3分钟，选择地区这里看你想要问卷是哪个地区给你填，你就选哪里，其余按我选的来就行，再点击生成API链接</h6>
+            <img class="tutorial-img" src="static/pictures/test/6.png"
+                 alt="生成API链接" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>7. 生成出来的链接类似于如图</h6>
+            <img class="tutorial-img" src="static/pictures/test/7.png"
+                 alt="API链接示例" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>8. 最后复制链接，到工具粘贴进去就可以正常使用了</h6>
+            <img class="tutorial-img" src="static/pictures/test/8.png"
+                 alt="粘贴使用" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <p class="proxy-note">小图看不清的话，点击图片即可放大查看。你也可以使用其他任何代理服务商的提取链接，只要访问后能返回「IP:端口」即可。</p>
+        </div>
+    </div>
+</div>
+
+<!-- 图片放大查看器（点击教程图片后全屏展示） -->
+<div id="imageViewer" class="image-viewer" onclick="closeImageViewer()">
+    <img id="imageViewerImg" src="" alt="放大查看">
 </div>
 
 <!-- 通用确认对话框（替代阻塞式 window.confirm） -->
@@ -287,6 +352,29 @@
     });
 
     // confirmBack() 统一定义在 analysis.js 中（使用自定义确认对话框）
+
+    // ===== 图片放大查看器：点击教程图片全屏展示，点击任意处关闭 =====
+    function openImageViewer(src) {
+        var viewer = document.getElementById('imageViewer');
+        var img = document.getElementById('imageViewerImg');
+        img.src = src;
+        viewer.classList.add('is-open');
+    }
+
+    function closeImageViewer() {
+        var viewer = document.getElementById('imageViewer');
+        var img = document.getElementById('imageViewerImg');
+        viewer.classList.remove('is-open');
+        // 延迟清空 src，避免关闭动画期间闪一下
+        setTimeout(function () { img.src = ''; }, 200);
+    }
+
+    // 按 Esc 也能关闭放大图
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            closeImageViewer();
+        }
+    });
 </script>
 </body>
 </html>

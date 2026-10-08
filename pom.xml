@@ -34,6 +34,19 @@
             <artifactId>lombok</artifactId>
             <version>1.18.32</version>
         </dependency>
+
+        <!-- JCEF 桌面内嵌浏览器（jcefmaven 自动加载对应平台原生库） -->
+        <dependency>
+            <groupId>me.friwi</groupId>
+            <artifactId>jcefmaven</artifactId>
+            <version>152.0.6</version>
+        </dependency>
+        <!-- JCEF Windows 平台原生库（CEF 二进制）。jcefmaven 不自动引入，需显式声明 -->
+        <dependency>
+            <groupId>me.friwi</groupId>
+            <artifactId>jcef-natives-windows-amd64</artifactId>
+            <version>jcef-17e805a+cef-152.0.6+g708dc14+chromium-152.0.7977.83</version>
+        </dependency>
     </dependencies>
 
     <build>

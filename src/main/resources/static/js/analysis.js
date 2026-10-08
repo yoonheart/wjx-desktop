@@ -25,10 +25,73 @@ function setVisible(target, visible) {
     return el;
 }
 
+// ===== 功能设置记忆（localStorage） =====
+const SETTINGS_KEY = 'wjxSettings';
+
+/**
+ * 从 localStorage 恢复功能详细设置。
+ * 保存的字段：proxySwitch、apiUrl、guiMode、timeControlSwitch、minFillTime、maxFillTime。
+ */
+function restoreSettings() {
+    let settings = null;
+    try {
+        settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+    } catch (e) {
+        settings = null;
+    }
+    if (!settings) return;
+
+    const proxySwitch = document.getElementById('proxySwitch');
+    const apiUrl = document.getElementById('apiUrl');
+    const guiMode = document.getElementById('guiMode');
+    const timeControlSwitch = document.getElementById('timeControlSwitch');
+    const minFillTime = document.getElementById('minFillTime');
+    const maxFillTime = document.getElementById('maxFillTime');
+
+    if (proxySwitch && typeof settings.proxySwitch === 'boolean') {
+        proxySwitch.checked = settings.proxySwitch;
+        setVisible(document.getElementById('apiUrlGroup'), proxySwitch.checked);
+    }
+    if (apiUrl && typeof settings.apiUrl === 'string') {
+        apiUrl.value = settings.apiUrl;
+    }
+    if (guiMode && typeof settings.guiMode === 'boolean') {
+        guiMode.checked = settings.guiMode;
+    }
+    if (timeControlSwitch && typeof settings.timeControlSwitch === 'boolean') {
+        timeControlSwitch.checked = settings.timeControlSwitch;
+        setVisible(document.getElementById('timeControlGroup'), timeControlSwitch.checked);
+    }
+    if (minFillTime && settings.minFillTime !== undefined) {
+        minFillTime.value = settings.minFillTime;
+    }
+    if (maxFillTime && settings.maxFillTime !== undefined) {
+        maxFillTime.value = settings.maxFillTime;
+    }
+}
+
+/**
+ * 把当前功能详细设置写入 localStorage。
+ */
+function saveSettings() {
+    const settings = {
+        proxySwitch: document.getElementById('proxySwitch') ? document.getElementById('proxySwitch').checked : true,
+        apiUrl: document.getElementById('apiUrl') ? document.getElementById('apiUrl').value : '',
+        guiMode: document.getElementById('guiMode') ? document.getElementById('guiMode').checked : false,
+        timeControlSwitch: document.getElementById('timeControlSwitch') ? document.getElementById('timeControlSwitch').checked : false,
+        minFillTime: document.getElementById('minFillTime') ? document.getElementById('minFillTime').value : 30,
+        maxFillTime: document.getElementById('maxFillTime') ? document.getElementById('maxFillTime').value : 150
+    };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
 // 页面加载完成后执行
     document.addEventListener('DOMContentLoaded', function() {
         // 清空文本答案配置，确保每次刷新都是新的开始
         textAnswersConfig = {};
+
+        // ===== 功能设置记忆功能：从 localStorage 恢复上次的设置 =====
+        restoreSettings();
 
         // 代理开关：控制API输入框显隐（默认开启显示）
         const proxySwitch = document.getElementById('proxySwitch');
@@ -36,6 +99,7 @@ function setVisible(target, visible) {
         if (proxySwitch && apiUrlGroup) {
             proxySwitch.addEventListener('change', function() {
                 setVisible(apiUrlGroup, proxySwitch.checked);
+                saveSettings();
             });
         }
 
@@ -45,6 +109,34 @@ function setVisible(target, visible) {
         if (timeControlSwitch && timeControlGroup) {
             timeControlSwitch.addEventListener('change', function() {
                 setVisible(timeControlGroup, timeControlSwitch.checked);
+                saveSettings();
+            });
+        }
+
+        // 代理链接、界面模式、时间区间输入框改动时记忆
+        ['apiUrl', 'guiMode', 'minFillTime', 'maxFillTime'].forEach(function(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('change', saveSettings);
+            }
+        });
+
+        // 代理链接一旦输入内容，清除错误高亮
+        const apiUrlInput = document.getElementById('apiUrl');
+        if (apiUrlInput) {
+            apiUrlInput.addEventListener('input', function() {
+                if (this.value.trim()) {
+                    this.classList.remove('is-error');
+                    setVisible('proxyErrorBox', false);
+                }
+            });
+        }
+
+        // 代理引导弹窗：点击"如何获取ip代理"按钮打开
+        const proxyHelpBtn = document.getElementById('proxyHelpBtn');
+        if (proxyHelpBtn) {
+            proxyHelpBtn.addEventListener('click', function() {
+                document.getElementById('proxyHelpModal').classList.add('is-open');
             });
         }
 
@@ -346,6 +438,24 @@ function setVisible(target, visible) {
             const headless = !guiMode;
             const useProxy = document.getElementById('proxySwitch').checked; // 默认开启代理
             const ipApiUrl = document.getElementById('apiUrl').value.trim();
+
+            // ===== 代理校验：开启代理但未填链接时，自动打开详细设置并红框提示 =====
+            if (useProxy && !ipApiUrl) {
+                // 自动打开功能详细设置弹窗
+                document.getElementById('detailSettingsModal').classList.add('is-open');
+                // 红框高亮输入框
+                const apiUrlInput = document.getElementById('apiUrl');
+                apiUrlInput.classList.add('is-error');
+                // 显示红色提示文字 + 如何获取按钮
+                setVisible('proxyErrorBox', true);
+                // 滚动/聚焦输入框
+                apiUrlInput.focus();
+                return;
+            }
+            // 校验通过后清除错误提示
+            document.getElementById('apiUrl').classList.remove('is-error');
+            setVisible('proxyErrorBox', false);
+
             // 时间控制（默认关闭）
             const timeControl = document.getElementById('timeControlSwitch').checked;
             let minFillTime = parseInt(document.getElementById('minFillTime').value) || 30;

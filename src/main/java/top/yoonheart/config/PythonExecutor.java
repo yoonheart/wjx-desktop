@@ -97,7 +97,9 @@ public final class PythonExecutor {
      * 解析可用的 Python 解释器命令。
      *
      * <p>优先读取系统属性 {@code wjx.python} 或环境变量 {@code WJX_PYTHON}；
-     * 未配置时依次探测 {@code python} / {@code py} / {@code python3}。</p>
+     * 其次查找软件目录内打包的 Python（{@code ${wjx.app.dir}/python/python.exe}），
+     * 保证打包后的软件在新机（无 Python 环境）也能运行脚本；
+     * 最后才依次探测 {@code python} / {@code py} / {@code python3}。</p>
      */
     private static String resolvePythonCommand() {
         String cached = pythonCommand;
@@ -112,12 +114,33 @@ public final class PythonExecutor {
             if (configured == null || configured.isBlank()) {
                 configured = System.getenv("WJX_PYTHON");
             }
-            pythonCommand = (configured != null && !configured.isBlank())
-                    ? configured.trim()
-                    : probePythonCommand();
+            if (configured != null && !configured.isBlank()) {
+                pythonCommand = configured.trim();
+            } else {
+                // 软件目录内打包的 Python 优先
+                String bundled = bundledPythonPath();
+                pythonCommand = (bundled != null) ? bundled : probePythonCommand();
+            }
             log.info("使用 Python 解释器: {}", pythonCommand);
             return pythonCommand;
         }
+    }
+
+    /** 软件目录内打包的 Python 解释器路径（不存在则返回 null） */
+    private static String bundledPythonPath() {
+        String appDir = System.getProperty("wjx.app.dir");
+        if (appDir == null || appDir.isBlank()) {
+            appDir = System.getenv("WJX_APP_DIR");
+        }
+        if (appDir == null || appDir.isBlank()) {
+            return null;
+        }
+        String exeName = isWindows() ? "python.exe" : "bin/python";
+        Path bundled = Paths.get(appDir, "python", exeName);
+        if (Files.exists(bundled)) {
+            return bundled.toString();
+        }
+        return null;
     }
 
     private static String probePythonCommand() {
@@ -196,6 +219,9 @@ public final class PythonExecutor {
                 processBuilder.environment().put("PYTHONIOENCODING", "utf-8");
             }
 
+            // 注入软件目录内的 Edge 驱动路径：脚本优先用这个 driver，避免依赖 Selenium Manager 联网下载
+            injectEdgeDriverPath(processBuilder);
+
             Process process = processBuilder.start();
 
             StringBuilder output = new StringBuilder();
@@ -232,6 +258,31 @@ public final class PythonExecutor {
             if (tempConfigFile != null && tempConfigFile.exists() && !tempConfigFile.delete()) {
                 log.warn("临时配置文件删除失败: {}", tempConfigFile.getAbsolutePath());
             }
+        }
+    }
+
+    /**
+     * 把软件目录内的 Edge 驱动路径注入到子进程环境变量 {@code WJX_EDGE_DRIVER}。
+     *
+     * <p>驱动由 EdgeDriverManager 下载到软件目录，脚本通过该环境变量拿到路径，
+     * 存在时才使用；不存在时置空，交给 Selenium Manager 兜底。</p>
+     */
+    private static void injectEdgeDriverPath(ProcessBuilder processBuilder) {
+        try {
+            String appDir = System.getProperty("wjx.app.dir");
+            if (appDir == null || appDir.isBlank()) {
+                appDir = System.getenv("WJX_APP_DIR");
+            }
+            if (appDir == null || appDir.isBlank()) {
+                return;
+            }
+            String exeName = isWindows() ? "msedgedriver.exe" : "msedgedriver";
+            Path driverPath = Paths.get(appDir, "driver", exeName);
+            if (Files.exists(driverPath)) {
+                processBuilder.environment().put("WJX_EDGE_DRIVER", driverPath.toString());
+            }
+        } catch (Exception e) {
+            log.debug("注入 Edge 驱动路径失败，忽略", e);
         }
     }
 

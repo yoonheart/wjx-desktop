@@ -1620,3 +1620,128 @@ input[type="number"]::-webkit-inner-spin-button {
 
 
 
+
+/* ===== 驱动下载进度条（首页） ===== */
+.driver-panel {
+    margin-top: var(--s4);
+    padding: var(--s3) var(--s4);
+    background: var(--surface-2);
+    border: 1px solid var(--surface-3);
+    border-radius: var(--r-2);
+    text-align: left;
+}
+
+.driver-panel-text {
+    font-size: 14px;
+    color: var(--ink-2);
+    margin-bottom: var(--s2);
+}
+
+.driver-track {
+    width: 100%;
+    height: 10px;
+    background: var(--surface-3);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.driver-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2, #4f7cff));
+    border-radius: 999px;
+    transition: width 0.3s ease;
+}
+
+.driver-panel-percent {
+    margin-top: var(--s2);
+    font-size: 13px;
+    color: var(--ink-3);
+    text-align: right;
+}
+
+/* 代理输入框错误高亮（红框 + 红字提示） */
+.api-input.is-error {
+    border-color: #dc3545 !important;
+    box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25) !important;
+}
+
+.proxy-error-text {
+    color: #dc3545;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: var(--s2);
+}
+
+.proxy-help-btn {
+    display: inline-block;
+    margin-left: var(--s2);
+    font-size: 13px;
+}
+
+/* ===== 代理引导弹窗 ===== */
+.proxy-example {
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 15px;
+    color: var(--accent, #4f7cff);
+    background: var(--surface-3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-1);
+    margin: var(--s2) 0;
+    display: inline-block;
+}
+
+.proxy-steps {
+    padding-left: 1.2em;
+    line-height: 1.9;
+}
+
+.proxy-note {
+    color: var(--ink-3);
+    font-size: 13px;
+    margin-top: var(--s3);
+}
+
+/* ===== 代理获取教程：步骤配图（点击可放大） ===== */
+.tutorial-img {
+    display: block;
+    width: auto;
+    max-width: 60%;
+    max-height: 260px;
+    margin: var(--s2) 0 var(--s4);
+    border: 1px solid var(--surface-3);
+    border-radius: var(--r-1);
+    cursor: zoom-in;
+    transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.tutorial-img:hover {
+    transform: scale(1.015);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* ===== 图片放大查看器（全屏遮罩） ===== */
+.image-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    background: rgba(0, 0, 0, 0.82);
+    cursor: zoom-out;
+}
+
+.image-viewer.is-open {
+    display: flex;
+}
+
+.image-viewer img {
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    border-radius: var(--r-2);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}

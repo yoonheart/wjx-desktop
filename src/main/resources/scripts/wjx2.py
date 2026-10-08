@@ -15,9 +15,14 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.edge.options import Options
+from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException, TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+
+# 软件目录内的 Edge 驱动路径（由 Java 端通过环境变量 WJX_EDGE_DRIVER 注入）。
+# 存在时优先使用，避免依赖 Selenium Manager 联网自动下载驱动。
+EDGE_DRIVER_PATH = os.environ.get("WJX_EDGE_DRIVER", "")
 
 current_ip = None  # 当前使用的IP
 ip_use_count = 0   # 当前IP已使用次数
@@ -654,7 +659,12 @@ def run():
         # ========== 刷题逻辑（补全超时+失败处理） ==========
         try:
             # 初始化Edge驱动 + 超时配置（防止卡死）
-            driver = webdriver.Edge(options=temp_option)
+            # 优先使用软件目录内匹配版本的驱动；不存在时回退到 Selenium Manager
+            if EDGE_DRIVER_PATH and os.path.exists(EDGE_DRIVER_PATH):
+                service = EdgeService(executable_path=EDGE_DRIVER_PATH)
+                driver = webdriver.Edge(service=service, options=temp_option)
+            else:
+                driver = webdriver.Edge(options=temp_option)
             driver.set_window_size(550, 650)
             driver.set_page_load_timeout(15)  # 页面加载超时15秒
             driver.set_script_timeout(10)     # 脚本执行超时10秒

@@ -1,10 +1,17 @@
 # 问卷星自动刷题工具 —— Python 侧依赖
 #
 # 安装：pip install -r requirements.txt
-# 说明：Java 端（Spring Boot）只负责 Web 壳与任务调度，
-#       真正的浏览器操作全部由 src/main/resources/scripts/ 下的两个脚本完成。
+#
+# 说明：
+#   - 使用 Releases 里的桌面版无需看这个文件 —— Python 运行时与依赖已全部内嵌进软件，
+#     这里只对「从源码运行 / 二次开发」的同学有用。
+#   - Java 端（Spring Boot）只负责 Web 壳与任务调度，
+#     真正的浏览器操作全部由 src/main/resources/scripts/ 下的两个脚本完成：
 #       scan.py  —— 解析问卷结构（需要 selenium + bs4 + lxml）
 #       wjx2.py  —— 实际填写提交（需要 selenium + requests）
+#   - Edge 驱动：优先使用软件目录 app/driver/ 里的 msedgedriver（由 Java 端按
+#     Edge 版本自动下载，经环境变量 WJX_EDGE_DRIVER 注入）；没有时交给
+#     Selenium Manager 自动匹配（需联网）。
 
 # 浏览器自动化。4.6 起内置 Selenium Manager，可以自动匹配并下载 Edge 驱动
 selenium>=4.6
@@ -13,7 +20,7 @@ selenium>=4.6
 beautifulsoup4>=4.11
 lxml>=4.9
 
-# 调用代理 IP 接口（wjx2.py 的 zanip）
+# 调用代理 IP 提取链接（wjx2.py 的 zanip）
 requests>=2.28
 
 # 注：原先的 numpy 依赖已移除。按概率选择选项改用标准库 random.choices，

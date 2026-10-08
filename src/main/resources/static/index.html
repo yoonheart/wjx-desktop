@@ -34,6 +34,16 @@
                 <span class="field-hint">仅接受 v.wjx.cn / www.wjx.cn 域名</span>
             </form>
 
+            <!-- 驱动下载进度条（点击解析后若驱动缺失/版本不符时显示） -->
+            <div id="driverPanel" class="driver-panel reveal reveal-3 is-hidden">
+                <div class="driver-panel-text">正在下载必备插件（Edge 驱动）...</div>
+                <div class="driver-track">
+                    <div id="driverBar" class="driver-fill" role="progressbar"
+                         aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <div class="driver-panel-percent"><span id="driverPercent">0</span>%</div>
+            </div>
+
             <div class="hero-foot reveal reveal-3">
                 <p class="disclaimer-free">本工具为免费工具</p>
                 <p class="disclaimer">
@@ -48,6 +58,7 @@
 
 <script src="/static/js/alert.js"></script>
 <script src="/static/js/request.js"></script>
+<script src="/static/js/api.js"></script>
 <script>
     const analyzeBtn = document.getElementById('analyzeBtn');
     const urlInput = document.getElementById('wjxUrl');
@@ -109,9 +120,115 @@
             return;
         }
 
-        // 跳转到解析页并传递问卷星URL
-        window.location.href = '/analysis?url=' + encodeURIComponent(url);
+        // 跳转到解析页前，先确保 Edge 驱动就绪（缺失/版本不符时下载到软件目录）
+        ensureDriverThenAnalyze(url);
     });
+
+    /**
+     * 检查 Edge 驱动：就绪则直接解析；否则显示进度条并下载。
+     * @param {string} url 问卷星链接
+     */
+    function ensureDriverThenAnalyze(url) {
+        const driverPanel = document.getElementById('driverPanel');
+
+        // 1. 先查询状态
+        api.wjx.driverStatus()
+            .then(data => {
+                const st = data.data || {};
+                // 已就绪，直接解析
+                if (st.ready) {
+                    window.location.href = '/analysis?url=' + encodeURIComponent(url);
+                    return;
+                }
+                // 未就绪：显示进度条并触发下载
+                showDriverPanel();
+                return api.wjx.driverDownload()
+                    .then(() => pollDriverProgress(url));
+            })
+            .catch(err => {
+                hideDriverPanel();
+                showAlert('驱动检查失败：' + err.message, 'error');
+            });
+    }
+
+    /** 轮询定时器句柄：跳转/页面恢复时必须清理，否则从解析页返回首页后
+     *  会因 bfcache 恢复旧状态而反复跳转，把用户困在「下载 100%」里 */
+    let driverPollTimer = null;
+
+    function showDriverPanel() {
+        const driverPanel = document.getElementById('driverPanel');
+        driverPanel.classList.remove('is-hidden');
+        analyzeBtn.disabled = true;
+    }
+
+    function hideDriverPanel() {
+        const driverPanel = document.getElementById('driverPanel');
+        driverPanel.classList.add('is-hidden');
+        analyzeBtn.disabled = false;
+    }
+
+    /** 把进度条 UI 归零（页面恢复/重新下载时用） */
+    function resetDriverPanel() {
+        const driverBar = document.getElementById('driverBar');
+        const driverPercent = document.getElementById('driverPercent');
+        if (driverBar) driverBar.style.width = '0%';
+        if (driverPercent) driverPercent.textContent = '0';
+    }
+
+    /**
+     * 轮询驱动下载进度，完成后跳转解析页。
+     */
+    function pollDriverProgress(url) {
+        const driverBar = document.getElementById('driverBar');
+        const driverPercent = document.getElementById('driverPercent');
+
+        // 防止重复起轮询
+        if (driverPollTimer) {
+            clearInterval(driverPollTimer);
+        }
+        driverPollTimer = setInterval(() => {
+            api.wjx.driverProgress()
+                .then(data => {
+                    const st = data.data || {};
+                    const pct = (st.progress >= 0) ? st.progress : 0;
+                    driverBar.style.width = pct + '%';
+                    driverPercent.textContent = pct;
+
+                    if (st.ready) {
+                        stopDriverPolling();
+                        driverBar.style.width = '100%';
+                        driverPercent.textContent = '100';
+                        setTimeout(() => {
+                            window.location.href = '/analysis?url=' + encodeURIComponent(url);
+                        }, 300);
+                    }
+                })
+                .catch(() => {
+                    // 单次轮询失败不中断，继续下一次
+                });
+        }, 500);
+    }
+
+    function stopDriverPolling() {
+        if (driverPollTimer) {
+            clearInterval(driverPollTimer);
+            driverPollTimer = null;
+        }
+    }
+
+    // 浏览器后退（bfcache 恢复）时，页面 DOM 状态原样保留：
+    // 进度条还挂在 100%、按钮仍禁用、旧的轮询定时器还活着（会导致反复跳转解析页）。
+    // 这里统一恢复到初始态，让用户能正常输入链接继续解析。
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) {
+            stopDriverPolling();
+            hideDriverPanel();
+            resetDriverPanel();
+        }
+    });
+
+    // 离开页面时也顺手停掉轮询，双保险
+    window.addEventListener('pagehide', stopDriverPolling);
 </script>
 </body>
 </html>

@@ -1,105 +1,142 @@
-# 问卷星自动刷题系统带可视化界面
+# 问卷星助手（wjx-desktop）
 
-基于 Spring Boot + Python(Selenium) 的问卷星自动填写工具。
+> 问卷星自动填写桌面版 —— **双击就能用，新机零环境依赖**
 
-## 功能
+<p align="center">
+  <img src="src/main/resources/static/pictures/头像.jpg" width="88" alt="问卷星助手">
+</p>
 
-- **问卷解析** — 输入问卷星链接，自动解析所有题型（单选、多选、填空、量表、矩阵、排序等）
-- **概率配置** — 为每个选项独立配置分布概率，支持「一键随机概率」
-- **异步任务** — 提交后后台执行，前端通过 SSE 实时展示进度，可随时停止
-- **详细设置** — ip代理、界面模式、时间控制（每份耗时区间 + 一 IP 一份）
+一个把「自动刷问卷」做成开箱即用桌面软件的项目：内置浏览器窗口，粘贴问卷链接 →
+解析题目 → 按题配置概率 → 开刷。不需要装 Java、不需要装 Python、不需要手动下驱动。
 
-> 目标份数范围 1~1000 份/任务，总量不设上限。
+---
 
-## 项目结构
+## ✨ 功能特性
+
+- **🖥 桌面软件**：JCEF 内嵌 Chromium 窗口，双击 `问卷星助手.exe` 直接使用
+- **📦 自包含**：内嵌 JDK + Python 运行时 + Edge 驱动自动下载，新机（只装有 Edge）解压即用
+- **🎯 可视化概率配置**：解析问卷后逐题、逐选项设置抽取概率，支持一键随机
+- **📋 全题型支持**：单选 / 多选 / 填空 / 量表 / 矩阵 / 排序 / 下拉框 / 滑块
+- **📡 实时进度**：SSE 长连接推送完成份数、失败次数、耗时，随时可停
+- **🌐 代理 IP 轮换**：粘贴代理提取链接即可自动换 IP（应对问卷星同 IP 12 份的风控）
+- **🔧 驱动自动管理**：自动检测本机 Edge 版本，从国内镜像下载匹配的 msedgedriver，并带下载进度条
+- **🛡 反检测**：无头模式、UA 指纹、隐藏 `navigator.webdriver`、智能验证码处理
+- **💾 设置记忆**：代理链接、界面模式、时间控制等配置自动保存，下次打开不用重填
+
+## 🚀 快速开始
+
+1. 到 [Releases](../../releases) 下载最新打包包，解压到**本机磁盘**（不要放网络共享盘）
+2. 首次运行：右键 `问卷星助手.exe` → 属性 → 勾选「**解除锁定**」→ 确定
+   （无签名软件的正常提示，解一次即可）
+3. 双击 `问卷星助手.exe`
+4. 粘贴问卷链接 → 开始解析 → 配置各题概率 → 「准备就绪！开刷」
+
+> 首次点「开始解析」时会自动下载与你的 Edge 版本匹配的驱动（约 23MB，国内镜像，几秒完成）。
+
+## 📖 使用教程
+
+1. 打开首页，粘贴问卷星链接（仅支持 `v.wjx.cn` / `www.wjx.cn`），点击「开始解析」
+2. 解析完成后为每道题的每个选项设置概率（各选项概率之和为 100，可用「一键随机概率」）
+3. 带输入框的选项点击「编辑文本答案」配置候选文本
+4. （可选）「功能详细设置」里配置代理 IP、界面模式（弹出浏览器实时观看）、单份耗时控制
+5. 点击「准备就绪！开刷」，进入进度面板实时查看，随时可停
+
+**如何获取代理 IP？** 软件内的「如何获取ip代理」按钮有 8 步图文教程
+（以 51 代理为例：注册送 20 元体验金，约可刷几万份）。
+
+## 🔧 工作原理
 
 ```
-src/main/java/top/yoonheart/
-├── WjxSpringbootApplication.java     # 启动入口
-├── config/
-│   ├── PythonExecutor.java           # Python 脚本调用引擎（脚本定位/解释器探测/超时控制）
-│   └── WebConfig.java                # 静态资源映射（/static/** → classpath:/static/）
-├── controller/
-│   ├── HiController.java             # 页面路由（转发到静态 HTML）
-│   ├── AnalysisController.java       # 问卷解析 API
-│   ├── BrushController.java          # 刷题任务 API
-│   └── BrushProgressController.java  # 进度订阅(SSE) / 停止任务
-├── service/
-│   └── BrushTaskManager.java         # 任务池、异步执行、进度回传
-├── model/
-│   └── BrushTask.java                # 任务实体
-└── po/
-    └── Result.java                   # 统一响应模型
-
-src/main/resources/
-├── application.yml                   # 端口 / 日志配置
-├── scripts/
-│   ├── scan.py                       # 问卷解析脚本
-│   └── wjx2.py                       # 自动刷题脚本
-└── static/
-    ├── index.html                    # 首页
-    ├── analysis.html                 # 解析与配置页
-    ├── js/                           # 前端 JS（request / api / alert / analysis / probability-validator）
-    └── pictures/                     # 使用须知中的题型示例图
+┌─────────────────────────────────────────────┐
+│              问卷星助手.exe (jpackage)        │
+│                                             │
+│  ┌─────────┐   localhost:8080   ┌─────────┐ │
+│  │  JCEF   │ ◄────────────────► │ Spring  │ │
+│  │ 内嵌窗口 │     HTTP/SSE       │ Boot    │ │
+│  └─────────┘                    └────┬────┘ │
+│                                     │ 子进程 │
+│                              ┌──────▼──────┐ │
+│                              │ Python      │ │
+│                              │ Selenium    │ │
+│                              └──────┬──────┘ │
+└─────────────────────────────────────┼────────┘
+                                      ▼
+                            Edge(msedgedriver) ──► 问卷星
 ```
 
-> 页面为纯静态 HTML，**不使用任何服务端模板引擎**（已从 JSP 迁移）。
-> `/` 与 `/analysis` 由 `HiController` 转发到对应静态文件，对外 URL 保持不变；
-> 页面数据全部通过 `/api/**` 接口异步获取。
+- **Java 层**（Spring Boot 3.5）：Web 服务、任务调度、SSE 进度推送、驱动下载管理
+- **Python 层**（Selenium）：真正的问卷解析与填写，通过进度文件与 Java 通信
+- **JCEF 层**：把 Web 界面渲染成桌面窗口，体验与原生软件一致
+- 进度经临时文件 + 500ms 轮询回传；停止任务通过标志文件优雅退出
 
-## 环境要求
+## 🛠 从源码构建
 
-- **JDK 17+**
-- **Maven 3.6+**
-- **Python 3.x** 并安装依赖：
+环境要求：JDK 17、Maven 3.6+（打包还需要 Windows + Python 3.x）
 
 ```bash
-pip install selenium beautifulsoup4 lxml requests
-```
+git clone https://github.com/YoonHeart/wjx-desktop.git
+cd wjx-desktop
 
-- **Microsoft Edge 浏览器**
-
-> Edge WebDriver 为**可选**：可通过环境变量 `WJX_EDGE_DRIVER` 指定驱动路径；
-> 未指定时直接交给 Selenium Manager 自动匹配版本（需联网）。源码中不内置任何本机路径。
->
-> Python 解释器默认依次探测 `python` / `py` / `python3`，
-> 也可通过环境变量 `WJX_PYTHON` 或启动参数 `-Dwjx.python=<路径>` 显式指定。
-
-## 使用流程
-
-1. 打开首页，粘贴问卷星链接，点击「开始解析」
-2. 在解析结果页为每道题的每个选项配置概率（或使用「一键随机概率」）
-3. （可选）点击「功能详细设置」调整 ip代理、界面模式、时间控制
-4. 点击「准备就绪！开刷」，页面切换为进度面板
-
-## 代理 IP 配置
-
-代理 IP 提取链接可在**「功能详细设置 → ip代理」**输入框中填写，
-也可通过环境变量 `WJX_IP_API` 提供；**两者都没有时脚本不会请求代理，直接使用本机 IP**。
-
-> 出于安全考虑，源码与发行包中**不再内置任何代理账号凭证**，请自行到代理服务商处申请提取链接。
-
-> 脚本按**三分钟短效 IP**设计，链接需自行申请。开启「时间控制」后一个 IP 仅填写一份。
-
-## 快速开始
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/YoonHeart/wjx-springboot.git
-cd wjx-springboot
-
-# 2. 安装 Python 依赖
-pip install -r requirements.txt
-
-# 3. 配置 Python 解释器与代理 IP 提取链接（可选）
-
-# 4. 启动 Spring Boot
+# 开发模式运行（浏览器访问 http://localhost:8080）
 mvn spring-boot:run
 
-# 5. 浏览器访问 http://localhost:8080
+# 一键打包桌面版（内嵌 JDK + JCEF + Python，产物在 release/v4/）
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 ```
 
-## 免责声明
+更多打包细节见 [打包说明.md](打包说明.md)。
 
-本工具仅用于技术研究和学习，不得用于任何非法用途或商业活动。
-使用本工具产生的一切后果由使用者自行承担，与开发者无关。
+## ❓ 常见问题
+
+<details>
+<summary><b>双击 exe 提示「无法验证发布者」？</b></summary>
+
+无签名软件的正常提示，点「运行」即可；或右键 exe → 属性 → 勾选「解除锁定」，
+之后不再弹。全新机器若遇到 SmartScreen 蓝色拦截，点「更多信息 → 仍要运行」。
+</details>
+
+<details>
+<summary><b>不要把软件放在网络共享盘运行</b></summary>
+
+软件要在自己的目录里写缓存、下载驱动、存进度文件，网络路径（如 Z:\ 共享盘）
+可能没有写权限，会导致启动失败。请解压到本机磁盘。
+</details>
+
+<details>
+<summary><b>点开刷提示「您需要输入ip代理链接」？</b></summary>
+
+开了代理开关但没填提取链接。问卷星风控下同一 IP 最多填 12 份，大量刷必须配代理。
+点提示旁的「如何获取ip代理」有详细图文教程；不填则使用本机 IP。
+</details>
+
+<details>
+<summary><b>驱动下载失败？</b></summary>
+
+驱动从阿里云 npmmirror 镜像下载（`registry.npmmirror.com/-/binary/edgedriver/`），
+确认能访问该域名。也可删除软件目录 `app/driver/` 后重启重下。
+</details>
+
+<details>
+<summary><b>支持哪些题型？</b></summary>
+
+单选、多选、填空、量表、矩阵、排序、下拉框、滑块。条件逻辑题自动适配（只填可见题）。
+单任务份数 1~1000，总量不设上限。
+</details>
+
+## 🧱 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 界面 | JCEF（jcefmaven）内嵌 Chromium + 原生 HTML/CSS/JS |
+| 后端 | Spring Boot 3.5 / Java 17，SSE 实时推送 |
+| 自动化 | Python 3 + Selenium + Edge WebDriver |
+| 打包 | jpackage（app-image）自包含，内嵌 Python embeddable |
+
+## ⚠️ 免责声明
+
+本工具仅用于**技术研究和学习**（如测试自己的问卷、了解自动化原理），
+不得用于任何非法用途或商业活动。使用本工具产生的一切后果由使用者自行承担，与开发者无关。
+
+## 📄 License
+
+[MIT](LICENSE)

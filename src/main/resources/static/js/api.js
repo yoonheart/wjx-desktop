@@ -15,6 +15,21 @@ const wjxApi = {
         // 添加标识表示这是一个启动任务的请求
         data.startTask = true;
         return requestUtil.post('/api/brush', data);
+    },
+
+    // 查询 Edge 驱动状态
+    driverStatus() {
+        return requestUtil.get('/api/driver/status');
+    },
+
+    // 触发驱动下载
+    driverDownload() {
+        return requestUtil.post('/api/driver/download');
+    },
+
+    // 查询驱动下载进度
+    driverProgress() {
+        return requestUtil.get('/api/driver/progress');
     }
 };
 
