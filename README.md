@@ -193,11 +193,3 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1   # full desktop buil
 
 发现任何渠道倒卖本软件，欢迎通过 GitHub Issues 联系作者举报。
 
-## Support / 支持
-
-问卷星助手免费、无广告。如果它帮到了你，欢迎请作者喝杯奶茶 —— 纯自愿。
-If this tool helped you, buying me a milk tea is appreciated — completely optional.
-
-<p align="center">
-  <img src="src/main/resources/static/pictures/a.png" width="220" alt="微信收款码 / WeChat QR">
-</p>
