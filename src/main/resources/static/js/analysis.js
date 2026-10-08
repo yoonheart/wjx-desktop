@@ -14,21 +14,93 @@ window.textAnswersConfig = textAnswersConfig;
     document.addEventListener('DOMContentLoaded', function() {
         // 清空文本答案配置，确保每次刷新都是新的开始
         textAnswersConfig = {};
-        
+
+        // 代理开关：控制API输入框显隐（默认开启显示）
+        const proxySwitch = document.getElementById('proxySwitch');
+        const apiUrlGroup = document.getElementById('apiUrlGroup');
+        if (proxySwitch && apiUrlGroup) {
+            proxySwitch.addEventListener('change', function() {
+                apiUrlGroup.style.display = proxySwitch.checked ? 'flex' : 'none';
+            });
+        }
+
+        // 时间控制开关：控制填写区间设置显隐（默认关闭）
+        const timeControlSwitch = document.getElementById('timeControlSwitch');
+        const timeControlGroup = document.getElementById('timeControlGroup');
+        if (timeControlSwitch && timeControlGroup) {
+            timeControlSwitch.addEventListener('change', function() {
+                timeControlGroup.style.display = timeControlSwitch.checked ? 'flex' : 'none';
+            });
+        }
+
+        // 详细设置按钮：打开弹窗
+        const detailSettingsBtn = document.getElementById('detailSettingsBtn');
+        if (detailSettingsBtn) {
+            detailSettingsBtn.addEventListener('click', function() {
+                document.getElementById('detailSettingsModal').style.display = 'block';
+            });
+        }
+
+        // 填写区间输入框验证（30~150秒，超出取最小/最大值并提醒，与目标份数逻辑一致）
+        const minFillTimeInput = document.getElementById('minFillTime');
+        const maxFillTimeInput = document.getElementById('maxFillTime');
+
+        // 单个输入框按 30~150 秒区间纠正自身取值
+        function clampFillTime(input, fallback) {
+            let value = parseInt(input.value);
+            if (isNaN(value)) {
+                showAlert('请输入有效的数字，填写时间应在30~150秒之间', 'error');
+                value = fallback;
+            } else if (value < 30) {
+                showAlert('填写时间应在30~150秒之间', 'error');
+                value = 30;
+            } else if (value > 150) {
+                showAlert('填写时间应在30~150秒之间', 'error');
+                value = 150;
+            }
+            input.value = value;
+            return value;
+        }
+
+        [minFillTimeInput, maxFillTimeInput].forEach(input => {
+            if (input) {
+                input.addEventListener('change', function() {
+                    const isMin = this === minFillTimeInput;
+                    // 1. 先保证自身在 30~150 秒之内
+                    let value = clampFillTime(this, isMin ? 30 : 150);
+
+                    // 2. 再保证「最小填写时间 <= 最大填写时间」：谁被改谁让步
+                    const otherInput = isMin ? maxFillTimeInput : minFillTimeInput;
+                    const otherValue = otherInput ? parseInt(otherInput.value) : NaN;
+                    if (!isNaN(otherValue)) {
+                        if (isMin && value > otherValue) {
+                            value = otherValue;
+                            this.value = value;
+                            showAlert('最小填写时间不能大于最大填写时间，已调整为 ' + otherValue + ' 秒', 'error');
+                        } else if (!isMin && value < otherValue) {
+                            value = otherValue;
+                            this.value = value;
+                            showAlert('最大填写时间不能小于最小填写时间，已调整为 ' + otherValue + ' 秒', 'error');
+                        }
+                    }
+                });
+            }
+        });
+
         // 目标份数输入框验证
         const targetCountInput = document.getElementById('targetCount');
         if (targetCountInput) {
             targetCountInput.addEventListener('change', function() {
                 let value = parseInt(this.value);
                 if (isNaN(value)) {
-                    value = 10;
-                    showAlert('请输入有效的数字，份数应在10~200之间', 'error');
-                } else if (value < 10) {
-                    value = 10;
-                    showAlert('份数应在10~200之间', 'error');
-                } else if (value > 200) {
-                    value = 200;
-                    showAlert('份数应在10~200之间', 'error');
+                    value = 1;
+                    showAlert('请输入有效的数字，份数应在1~1000之间', 'error');
+                } else if (value < 1) {
+                    value = 1;
+                    showAlert('份数应在1~1000之间', 'error');
+                } else if (value > 1000) {
+                    value = 1000;
+                    showAlert('份数应在1~1000之间', 'error');
                 }
                 this.value = value;
             });
@@ -135,12 +207,8 @@ window.textAnswersConfig = textAnswersConfig;
         };
     }
     
-    window.onclick = function(event) {
-        if (event.target.classList.contains('modal')) {
-            event.target.style.display = 'none';
-        }
-    }
-    
+    // 注：不再支持点击弹窗外部关闭（按用户要求，弹窗只能通过关闭按钮关闭）
+
     // 系统使用简介按钮点击事件
     const usageIntroBtn = document.getElementById('usageIntroBtn');
     if (usageIntroBtn) {
@@ -187,20 +255,45 @@ window.textAnswersConfig = textAnswersConfig;
                 // 概率配置合法，可以继续执行刷问卷操作
                 // 获取当前设置的参数
             const targetCount = document.getElementById('targetCount').value;
-            const url = new URLSearchParams(window.location.search).get('url');
+            const urlParams = new URLSearchParams(window.location.search);
+            const url = urlParams.get('url');
             const speedMultiplier = 2; // 默认使用2线程
-            
+            // 从页面上的设置项直接读取（仅本次使用）
+            const headless = document.getElementById('headlessMode').checked; // 默认无界面模式
+            const useProxy = document.getElementById('proxySwitch').checked; // 默认开启代理
+            const ipApiUrl = document.getElementById('apiUrl').value.trim();
+            // 时间控制（默认关闭）
+            const timeControl = document.getElementById('timeControlSwitch').checked;
+            let minFillTime = parseInt(document.getElementById('minFillTime').value) || 30;
+            let maxFillTime = parseInt(document.getElementById('maxFillTime').value) || 150;
+            // 兜底：确保「最小填写时间 <= 最大填写时间」
+            if (minFillTime > maxFillTime) {
+                const tmp = minFillTime;
+                minFillTime = maxFillTime;
+                maxFillTime = tmp;
+            }
+
             // 弹出确认框
-            if (confirm(`当前设置参数：\n问卷星链接：${url}\n目标份数：${targetCount}份\n\n开始后无法停止！！！是否继续？`)) {
+            const timeTip = timeControl
+                ? `\n时间控制：开启（每份 ${minFillTime}~${maxFillTime} 秒，一个IP只填一份）`
+                : '\n时间控制：关闭';
+            if (confirm(`当前设置参数：\n问卷星链接：${url}\n目标份数：${targetCount}份\n无头模式：${headless ? '开启' : '关闭'}\n代理：${useProxy ? '开启' : '关闭'}${timeTip}\n\n开始后无法停止！！！是否继续？`)) {
                 // 收集所有题目配置
                 const questionsConfig = collectQuestionsConfig();
-                
+
                 // 构建请求数据
                 const requestData = {
                     url: url,
+                    // 目标份数直接使用用户输入的值
                     targetCount: parseInt(targetCount),
                     speedMultiplier: speedMultiplier,
-                    questions: questionsConfig
+                    questions: questionsConfig,
+                    headless: headless,
+                    useProxy: useProxy,
+                    ipApiUrl: ipApiUrl,
+                    timeControl: timeControl,
+                    minFillTime: minFillTime,
+                    maxFillTime: maxFillTime
                 };
                     
                     // 保存当前配置状态
@@ -210,9 +303,6 @@ window.textAnswersConfig = textAnswersConfig;
                         questionsConfig: questionsConfig
                     };
                     localStorage.setItem('wjxCurrentConfig', JSON.stringify(currentConfig));
-                    
-                    // 显示程序运行中界面
-                    showRunningInterface();
                     
                     // 生成任务ID
                     const taskId = 'task_' + Date.now();
@@ -236,41 +326,28 @@ window.textAnswersConfig = textAnswersConfig;
                     localStorage.setItem('wjxHistory', JSON.stringify(history));
                     updateHistoryModal();
                     
-                    // 调用后端API
-                    api.wjx.brush(requestData)
-                        .then(data => {
-                            // 程序运行结束，更新界面
-                            showCompletedInterface(data);
-                            
-                            
-                            
-                            // 更新历史记录中的任务状态
-                            history = JSON.parse(localStorage.getItem('wjxHistory') || '[]');
-                            const recordIndex = history.findIndex(r => r.taskId === taskId);
-                            if (recordIndex !== -1) {
-                                history[recordIndex].result = data;
-                                localStorage.setItem('wjxHistory', JSON.stringify(history));
-                                updateHistoryModal();
+                    // 调用后端API启动异步任务
+                    api.wjx.brushStart(requestData)
+                        .then(response => {
+                            if (response.code === 1) {
+                                // 启动成功，开始监控进度
+                                startProgressMonitoring(response.data.taskId);
+                            } else {
+                                showAlert('任务启动失败: ' + response.msg, 'error');
+                                // 恢复界面
+                                document.getElementById('analysisContent').style.display = 'block';
+                                document.getElementById('brushBtn').style.display = 'block';
                             }
                         })
                         .catch(error => {
-                            console.error('刷问卷失败:', error);
-                            showAlert('刷问卷失败: ' + error.message, 'error');
+                            console.error('任务启动失败:', error);
+                            showAlert('任务启动失败: ' + error.message, 'error');
                             // 恢复界面
                             document.getElementById('analysisContent').style.display = 'block';
                             document.getElementById('brushBtn').style.display = 'block';
-                            
+
                             // 清除运行中的任务ID
                             localStorage.removeItem('wjxRunningTaskId');
-                            
-                            // 更新历史记录中的任务状态
-                            history = JSON.parse(localStorage.getItem('wjxHistory') || '[]');
-                            const recordIndex = history.findIndex(r => r.taskId === taskId);
-                            if (recordIndex !== -1) {
-                                history[recordIndex].result = { message: '任务失败: ' + error.message };
-                                localStorage.setItem('wjxHistory', JSON.stringify(history));
-                                updateHistoryModal();
-                            }
                         });
                 }
             } else {
@@ -1209,30 +1286,22 @@ function collectQuestionsConfig() {
 
 // 显示程序运行中界面
 function showRunningInterface() {
+    // 新版：直接显示进度条面板，不再显示文字提示
     const analysisContent = document.getElementById('analysisContent');
     const brushBtn = document.getElementById('brushBtn');
-    
+    const progressPanel = document.getElementById('progressPanel');
+
     // 隐藏分析内容和刷问卷按钮
     analysisContent.style.display = 'none';
     brushBtn.style.display = 'none';
-    
-    // 创建运行中界面
-    const runningInterface = document.createElement('div');
-    runningInterface.id = 'runningInterface';
-    runningInterface.style.textAlign = 'center';
-    runningInterface.style.padding = '50px';
-    
-    runningInterface.innerHTML = `
-        <div class="loading-container">
-            <div class="loading-spinner"></div>
-            <div class="loading-text">正在刷问卷中，请耐心等待...</div>
-        </div>
-        <p style="margin-top: 20px; color: #666;">正在按照配置的参数刷问卷，请不要关闭浏览器窗口，可查看问卷星平台确认进度</p>
-    `;
-    
-    // 添加到卡片内容区域
-    const cardBody = document.querySelector('.card-body');
-    cardBody.appendChild(runningInterface);
+
+    // 显示进度条面板
+    if (progressPanel) {
+        progressPanel.style.display = 'block';
+        // 初始化进度条
+        const targetCount = parseInt(document.getElementById('targetCount').value);
+        document.getElementById('targetCount').textContent = targetCount;
+    }
 }
 
 // 显示程序运行完成界面
@@ -1324,24 +1393,23 @@ function showCompletedInterface(data) {
                     </div>
                   </div>`;
     
-    // 构建统计信息
+    // 构建统计信息（不显示失败份数）
     let statsHtml = '';
     if (successCount > 0 || failedCount > 0) {
+        // 目标份数使用用户输入的值（输入框），避免与成功/失败份数混淆
+        const targetInput = document.getElementById('targetCount');
+        const userTarget = targetInput ? parseInt(targetInput.value) : 0;
         statsHtml = `
-            <div style="margin: 20px auto; padding: 15px; background-color: #e8f4f8; border-radius: 5px; max-width: 80%;">
-                <h6 style="margin-bottom: 10px; color: #17a2b8;"><i class="fa fa-bar-chart" aria-hidden="true"></i> 运行统计</h6>
-                <div style="display: flex; gap: 20px; justify-content: center;">
-                    <div style="flex: 1; text-align: center;">
-                        <span style="font-weight: bold; color: #28a745;">成功份数：</span>
-                        <span>${successCount}</span>
+            <div style="margin: 0 auto; padding: 25px; background-color: #f8f9fa; border-radius: 12px; max-width: 380px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+                <div style="display: flex; justify-content: center; gap: 60px; align-items: center;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 13px; color: #999; margin-bottom: 5px;">成功份数</div>
+                        <div style="font-size: 36px; font-weight: bold; color: #28a745;">${successCount}</div>
                     </div>
-                    <div style="flex: 1; text-align: center;">
-                        <span style="font-weight: bold; color: #dc3545;">失败份数：</span>
-                        <span>${failedCount}</span>
-                    </div>
-                    <div style="flex: 1; text-align: center;">
-                        <span style="font-weight: bold; color: #6c757d;">总份数：</span>
-                        <span>${successCount + failedCount}</span>
+                    <div style="width: 1px; height: 40px; background-color: #dee2e6;"></div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 13px; color: #999; margin-bottom: 5px;">目标份数</div>
+                        <div style="font-size: 36px; font-weight: bold; color: #2D3748;">${userTarget || (successCount + failedCount)}</div>
                     </div>
                 </div>
             </div>
@@ -1349,10 +1417,10 @@ function showCompletedInterface(data) {
     }
     
     completedInterface.innerHTML = `
-        <h3 style="color: #28a745;"><i class="fa fa-check-circle" aria-hidden="true"></i> 运行结束</h3>
+        <h3 style="color: #28a745; margin-bottom: 25px;">
+            <i class="fa fa-check-circle" aria-hidden="true"></i> 运行结束
+        </h3>
         ${statsHtml}
-        <h5>运行结果：</h5>
-        ${resultHtml}
     `;
     
     // 清空分析内容并添加完成界面
@@ -1369,15 +1437,13 @@ function formatResultData(data) {
         return data.message;
     }
     
-    // 检查是否有successCount和failedCount
+    // 检查是否有successCount和failedCount（不显示失败份数）
     if (data.successCount !== undefined || data.failedCount !== undefined) {
         let result = '';
         if (data.message) {
             result += data.message + '\n\n';
         }
         result += `成功份数：${data.successCount || 0}\n`;
-        result += `失败份数：${data.failedCount || 0}\n`;
-        result += `总份数：${(data.successCount || 0) + (data.failedCount || 0)}\n`;
         return result;
     }
     
@@ -1892,12 +1958,132 @@ function generateRandomSumTo100(count) {
     
     // 最后一个数是剩余的值
     probs.push(remaining);
-    
+
     // 随机打乱数组
     for (let i = probs.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [probs[i], probs[j]] = [probs[j], probs[i]];
     }
-    
+
     return probs;
 }
+
+// ===== 进度管理逻辑 =====
+let sse = null;
+let currentTaskId = null;
+
+function startProgressMonitoring(taskId) {
+    currentTaskId = taskId;
+    const analysisContent = document.getElementById('analysisContent');
+    const brushBtn = document.getElementById('brushBtn');
+    const progressPanel = document.getElementById('progressPanel');
+
+    // 隐藏分析内容和刷问卷按钮，进度面板独占页面（类似之前文字展示的效果）
+    analysisContent.style.display = 'none';
+    brushBtn.style.display = 'none';
+    progressPanel.style.display = 'block';
+
+    // 从系统配置获取目标份数（输入框的值）
+    const targetCount = parseInt(document.getElementById('targetCount').value);
+    document.getElementById('progressTargetCount').textContent = targetCount;
+
+    // 创建SSE连接
+    sse = new EventSource(`/api/brush/progress/${taskId}`);
+
+    // 后端发送的是命名事件 "progress"，必须用 addEventListener 接收
+    sse.addEventListener('progress', function(event) {
+        try {
+            const data = JSON.parse(event.data);
+            // 更新进度条宽度
+            document.getElementById('progressBar').style.width = data.percent + '%';
+            // 更新已完成数量
+            document.getElementById('completedCount').textContent = data.completed;
+            // 更新百分比显示
+            document.getElementById('percentDisplay').textContent = data.percent;
+            // 更新目标份数（若后端有值则用后端值）
+            if (data.total && data.total > 0) {
+                document.getElementById('progressTargetCount').textContent = data.total;
+            }
+
+            if (data.status === 'COMPLETED') {
+                sse.close();
+                // 进度条填满
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('percentDisplay').textContent = '100';
+                // 隐藏进度面板
+                document.getElementById('progressPanel').style.display = 'none';
+                // 将进度数据映射为完成界面期望的格式
+                showCompletedInterface({
+                    data: {
+                        successCount: data.completed,
+                        failedCount: data.failed
+                    }
+                });
+            } else if (data.status === 'FAILED' || data.status === 'STOPPED') {
+                sse.close();
+                // 保留进度面板显示结束状态，不突然消失
+                const title = document.getElementById('progressTitle');
+                const bar = document.getElementById('progressBar');
+                const stopBtn = document.getElementById('stopButton');
+                if (data.status === 'FAILED') {
+                    title.innerHTML = '<i class="fa fa-times-circle" aria-hidden="true"></i> 任务失败';
+                    title.style.color = '#dc3545';
+                    bar.classList.remove('bg-success');
+                    bar.classList.add('bg-danger');
+                } else {
+                    title.innerHTML = '<i class="fa fa-stop-circle" aria-hidden="true"></i> 任务已停止';
+                    title.style.color = '#ffc107';
+                }
+                // 按钮变为"返回配置"
+                stopBtn.className = 'btn btn-primary';
+                stopBtn.innerHTML = '<i class="fa fa-arrow-left" aria-hidden="true"></i> 返回配置';
+                stopBtn.onclick = restoreAfterTaskEnd;
+            }
+        } catch (e) {
+            console.error('解析进度数据失败:', e);
+        }
+    });
+
+    sse.onerror = function() {
+        console.error('SSE连接出错，尝试重新连接...');
+    };
+}
+
+function stopTask() {
+    if (currentTaskId && sse) {
+        sse.close();
+        fetch(`/api/brush/stop/${currentTaskId}`, {
+            method: 'POST'
+        }).then(() => {
+            // 恢复完整界面：隐藏进度面板，重新显示解析内容和开刷按钮
+            document.getElementById('progressPanel').style.display = 'none';
+            document.getElementById('analysisContent').style.display = 'block';
+            document.getElementById('brushBtn').style.display = 'block';
+            showAlert('任务已停止', 'info');
+        });
+    }
+}
+
+// 任务结束（失败/停止）后点击"返回配置"恢复界面
+function restoreAfterTaskEnd() {
+    document.getElementById('progressPanel').style.display = 'none';
+    document.getElementById('analysisContent').style.display = 'block';
+    document.getElementById('brushBtn').style.display = 'block';
+    // 重置进度面板状态，方便下次任务
+    const title = document.getElementById('progressTitle');
+    const bar = document.getElementById('progressBar');
+    const stopBtn = document.getElementById('stopButton');
+    title.innerHTML = '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 正在刷问卷';
+    title.style.color = '#28a745';
+    bar.classList.remove('bg-danger');
+    bar.classList.add('bg-success');
+    bar.style.width = '0%';
+    document.getElementById('completedCount').textContent = '0';
+    document.getElementById('percentDisplay').textContent = '0';
+    stopBtn.className = 'btn btn-danger';
+    stopBtn.innerHTML = '<i class="fa fa-stop" aria-hidden="true"></i> 停止任务';
+    stopBtn.onclick = stopTask;
+}
+
+// 初始化停止按钮
+document.getElementById('stopButton').addEventListener('click', stopTask);

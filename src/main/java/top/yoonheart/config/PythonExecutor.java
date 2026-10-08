@@ -103,6 +103,13 @@ public class PythonExecutor {
      * 通用Python脚本执行方法
      */
     public static String executePythonScript(String scriptPath, String... args) {
+        return executePythonScriptSync(scriptPath, args);
+    }
+
+    /**
+     * 同步执行Python脚本
+     */
+    public static String executePythonScriptSync(String scriptPath, String... args) {
         File tempFile = null;
         try {
             List<String> command = new ArrayList<>();
@@ -112,7 +119,7 @@ public class PythonExecutor {
             // 判断是否需要使用临时文件（基于脚本名称和参数内容）
             boolean useTempFile = false;
             String configJson = null;
-            
+
             // 检查脚本名称是否包含"wjx2"（问卷星脚本），并且参数长度大于0
             if (scriptPath.contains("wjx2") && args.length > 0) {
                 // 尝试判断第一个参数是否为JSON字符串（以{开头）
@@ -126,10 +133,10 @@ public class PythonExecutor {
             if (useTempFile) {
                 // 创建临时文件来存储JSON配置
                 tempFile = File.createTempFile("config", ".json");
-                
+
                 // 将JSON配置写入临时文件
                 Files.write(tempFile.toPath(), configJson.getBytes(StandardCharsets.UTF_8));
-                
+
                 // 传递临时文件路径作为参数
                 command.add(tempFile.getAbsolutePath());
             } else {
@@ -139,13 +146,13 @@ public class PythonExecutor {
 
 
             ProcessBuilder processBuilder = new ProcessBuilder(command);
-            
+
             // 处理Windows系统的中文路径问题
             if (System.getProperty("os.name").toLowerCase().contains("win")) {
                 // 设置编码为UTF-8
                 processBuilder.environment().put("PYTHONIOENCODING", "utf-8");
             }
-            
+
             Process process = processBuilder.start();
 
             // 异步读取输出和错误流（避免阻塞）
@@ -188,7 +195,8 @@ public class PythonExecutor {
             // ---------------------
             // 进程超时处理模块
             // ---------------------
-            if (!process.waitFor(3600, TimeUnit.SECONDS)) {  // 延长超时时间到1小时
+            // 时间控制模式下刷题可能长达20小时以上（1000份×150秒÷2线程），设为48小时
+            if (!process.waitFor(172800, TimeUnit.SECONDS)) {
                 // 分阶段销毁进程，优先优雅终止
                 process.destroy();
 
@@ -238,6 +246,33 @@ public class PythonExecutor {
                 }
             }
         }
+    }
+
+    /**
+     * 异步执行Python脚本（用于长时间运行的任务）
+     */
+    public static void executePythonScriptAsync(String scriptPath, String configJson, String taskId, ProgressCallback callback) {
+        // 在新线程中执行
+        new Thread(() -> {
+            try {
+                String result = executePythonScriptSync(scriptPath, configJson);
+                if (callback != null) {
+                    callback.onComplete(taskId, result);
+                }
+            } catch (Exception e) {
+                if (callback != null) {
+                    callback.onError(taskId, e);
+                }
+            }
+        }).start();
+    }
+
+    /**
+     * 进度回调接口
+     */
+    public interface ProgressCallback {
+        void onComplete(String taskId, String result);
+        void onError(String taskId, Exception error);
     }
 
     // 测试示例

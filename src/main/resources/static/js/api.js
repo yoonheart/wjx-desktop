@@ -11,6 +11,13 @@ const wjxApi = {
     // 刷问卷
     brush(data) {
         return requestUtil.post('/api/brush', data);
+    },
+
+    // 启动刷问卷任务（异步）
+    brushStart(data) {
+        // 添加标识表示这是一个启动任务的请求
+        data.startTask = true;
+        return requestUtil.post('/api/brush', data);
     }
 };
 

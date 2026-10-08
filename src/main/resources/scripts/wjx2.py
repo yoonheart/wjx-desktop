@@ -22,12 +22,84 @@ from selenium.webdriver.support import expected_conditions as EC
 
 current_ip = None  # 当前使用的IP
 ip_use_count = 0   # 当前IP已使用次数
-IP_MAX_USE = 10    # 单个IP最大使用次数（你实测的10-12份）
+ip_max_use = 10    # 从配置读取的单个IP最大使用次数
 ip_lock = threading.Lock()  # IP操作锁
+
+# 线程安全的计数器，替代全局变量
+class ThreadSafeCounter:
+    def __init__(self):
+        self._value = 0
+        self._lock = threading.Lock()
+
+    def increment(self):
+        with self._lock:
+            self._value += 1
+            return self._value
+
+    def get(self):
+        with self._lock:
+            return self._value
+
+    def try_increment(self, limit):
+        """原子操作：仅在未达到上限时递增。返回True表示已递增，False表示已达上限"""
+        with self._lock:
+            if self._value >= limit:
+                return False
+            self._value += 1
+            return True
+
+    def decrement(self):
+        """原子递减（不低于0），用于刷题失败时回退预定名额"""
+        with self._lock:
+            if self._value > 0:
+                self._value -= 1
+            return self._value
+
+# 初始化线程安全计数器
+counter_completed = ThreadSafeCounter()
+counter_failed = ThreadSafeCounter()
+
+def update_progress():
+    """原子写入进度文件"""
+    progress_file = config.get("progress_file", "progress.json")
+    # 如果没有指定进度文件，则不进行进度更新
+    if not progress_file:
+        return
+
+    temp_file = progress_file + ".tmp"
+    progress_data = {
+        "taskId": config.get("taskId", "unknown"),
+        "status": "RUNNING",
+        "targetCount": config.get("target_num", 3),
+        "completedCount": counter_completed.get(),
+        "failedCount": counter_failed.get(),
+        "currentThread": threading.current_thread().name,
+        "timestamp": int(time.time() * 1000)
+    }
+    try:
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(progress_data, f, ensure_ascii=False)
+        os.replace(temp_file, progress_file)
+    except Exception as e:
+        # 进度更新失败不应该影响主流程
+        print(f"进度更新失败: {e}")
+
+
+def check_stop_flag():
+    """检查是否收到停止信号"""
+    stop_file = config.get("stop_file", "stop.flag")
+    # 如果没有指定停止文件，则不进行停止检查
+    if not stop_file:
+        return False
+    return os.path.exists(stop_file)
+
+# 默认代理IP API链接（首页可自定义覆盖）
+DEFAULT_IP_API = "http://bapi.51daili.com/getapi2?linePoolIndex=-1&packid=2&time=11&qty=1&port=1&format=txt&dt=2&ct=1&dtc=2&regionCode=500100&rid=mso0aw2b1yn0b1x60z5s5&uid=72829&accessName=yoonheart&accessPassword=795C48CE03F0EF42D366F095D6F5340E&skey=autoaddwhiteip"
+
 
 def zanip():
     """优化版：加重试+错误处理，确保拿到有效IP"""
-    api = "api填写处"
+    api = config.get("ip_api_url", DEFAULT_IP_API)
     max_retry = 3  # 最多重试3次
     retry_count = 0
 
@@ -52,9 +124,44 @@ def zanip():
 # ========== 全局配置（从JSON动态加载） ==========
 config = {}
 
+# 线程安全的计数器，替代全局变量
+class ThreadSafeCounter:
+    def __init__(self):
+        self._value = 0
+        self._lock = threading.Lock()
+
+    def increment(self):
+        with self._lock:
+            self._value += 1
+            return self._value
+
+    def get(self):
+        with self._lock:
+            return self._value
+
+    def try_increment(self, limit):
+        """原子操作：仅在未达到上限时递增。返回True表示已递增，False表示已达上限"""
+        with self._lock:
+            if self._value >= limit:
+                return False
+            self._value += 1
+            return True
+
+    def decrement(self):
+        """原子递减（不低于0），用于刷题失败时回退预定名额"""
+        with self._lock:
+            if self._value > 0:
+                self._value -= 1
+            return self._value
+
+# 初始化线程安全计数器
+counter_completed = ThreadSafeCounter()
+counter_failed = ThreadSafeCounter()
+
+# 每个线程独立的开始填写时间（避免多线程互相覆盖）
+thread_local_data = threading.local()
+
 # 新增：全局变量提前初始化（解决多线程读取不到的问题）
-cur_num = 0
-cur_fail = 0
 lock = threading.Lock()
 
 
@@ -387,19 +494,37 @@ def brush(driver: WebDriver):
             print(f"处理第{current}题时出错: {e}")
             continue
 
-    # 翻页/提交逻辑
+    # 翻页/提交逻辑（返回True=已提交，False=未提交）
     time.sleep(0.5)
     try:
         driver.find_element(By.CSS_SELECTOR, "#divNext").click()
         time.sleep(0.5)
-        brush(driver)  # 递归处理下一页
+        return brush(driver)  # 递归处理下一页，返回内层提交结果
     except:
+        # 已到最后一页：时间控制模式下，先等待目标时长再提交（模拟真人填写耗时）
+        min_fill = config.get("min_fill_time")
+        max_fill = config.get("max_fill_time")
+        fill_start = getattr(thread_local_data, 'fill_start_time', None)
+        if min_fill and max_fill and fill_start:
+            target_duration = random.uniform(float(min_fill), float(max_fill))
+            actual_duration = time.time() - fill_start
+            # 分段等待（每5秒检查一次停止信号）
+            while actual_duration < target_duration:
+                if check_stop_flag():
+                    print("等待期间收到停止信号，放弃提交")
+                    return False
+                chunk = min(5.0, target_duration - actual_duration)
+                time.sleep(chunk)
+                actual_duration = time.time() - fill_start
+            print(f"填写时长{target_duration:.0f}秒，开始提交")
         try:
             driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
             submit(driver)
         except:
             print("未找到提交按钮，尝试直接提交")
             submit(driver)
+        # 提交动作已执行，无论页面URL是否变化都视为已提交
+        return True
 
 
 # 提交函数
@@ -430,22 +555,31 @@ def submit(driver: WebDriver):
 
 # 运行函数
 def run(xx, yy):
-    global config, current_ip, ip_use_count
+    global config, current_ip, ip_use_count, ip_max_use
     target_num = config.get("target_num", 3)
     fail_threshold = config.get("fail_threshold", target_num / 4 + 1)
-    use_ip = True   #config.get("use_ip", False)
+    use_ip = config.get("use_ip", False)
+    # 单个IP最大使用次数（时间控制模式下为1，即一个IP只填一份）
+    ip_max_use = int(config.get("ip_max_use", 10))
+    # 注：填写时长区间在 brush() 提交前直接从 config 读取
 
-    global cur_num, cur_fail
+    # 移除全局变量，使用线程安全的计数器对象
     while True:
-        with lock:
-            if cur_num >= target_num:
-                break
+        # 检查是否收到停止信号
+        if check_stop_flag():
+            print("收到停止信号，正在优雅退出...")
+            break
+
+        # 原子预定一个名额：若已达目标份数则退出
+        # （关键修复：在开始刷之前占用配额，避免双线程各刷一份导致超出目标）
+        if not counter_completed.try_increment(target_num):
+            break
 
         # ========== IP复用逻辑（核心修复：IP副本+原子操作） ==========
         local_ip = None
         with ip_lock:
             # 首次/IP已用完/无IP时，获取新IP
-            if not use_ip or current_ip is None or ip_use_count >= IP_MAX_USE:
+            if not use_ip or current_ip is None or ip_use_count >= ip_max_use:
                 if use_ip:
                     new_ip = zanip()
                     if new_ip:
@@ -466,9 +600,11 @@ def run(xx, yy):
         # ========== Edge驱动配置（补全无头+超时+反检测） ==========
         temp_option = Options()
 
-        # 1. 关闭无头模式（弹出浏览器）
-        # temp_option.add_argument("--headless=new")
-        # temp_option.add_argument("--window-size=1920,1080")  # 无头模式必须指定窗口大小
+        # 1. 无头模式（从配置读取，默认开启——不弹出浏览器窗口）
+        headless = config.get("headless", True)
+        if headless:
+            temp_option.add_argument("--headless=new")
+            temp_option.add_argument("--window-size=1920,1080")  # 无头模式必须指定窗口大小
 
         # 2. 基础反检测（隐藏webdriver特征）
         temp_option.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -521,6 +657,9 @@ def run(xx, yy):
 
         # ========== 刷题逻辑（补全超时+失败处理） ==========
         try:
+            # 记录本份问卷开始填写时间（线程独立，时间控制模式在提交前按此补足时长）
+            thread_local_data.fill_start_time = time.time()
+
             # 显式等待页面加载完成（最多15秒）
             driver.get(config["url"])
             WebDriverWait(driver, 15).until(
@@ -529,39 +668,47 @@ def run(xx, yy):
 
             # 页面加载后随机延迟（模拟真人等待）
             time.sleep(random.uniform(1.0, 2.5))
-            url1 = driver.current_url
-            brush(driver)
+            submitted = brush(driver)  # 内部在最终提交前会按时间控制配置等待，返回是否已提交
             time.sleep(random.uniform(4.0, 5.0))
-            url2 = driver.current_url
 
-            if url1 != url2:
-                with lock:
-                    if cur_num >= target_num:
-                        continue
-                    cur_num += 1
-                    print(f"✅ 已填写{cur_num}份 - 失败{cur_fail}次  -执行时间: {time.strftime('%H:%M:%S', time.localtime())}")
+            if submitted:
+                # 名额已在循环开头预定，这里只打印和更新进度
+                print(f"已填写{counter_completed.get()}份 - 失败{counter_failed.get()}次  -执行时间: {time.strftime('%H:%M:%S', time.localtime())}")
+
+                # 更新进度文件
+                update_progress()
+            else:
+                # 未提交（等待期间收到停止信号），回退预定名额
+                counter_completed.decrement()
         except TimeoutException:
-            # 处理页面加载超时
+            # 处理页面加载超时：回退预定名额
+            counter_completed.decrement()
             print(f"❌ 线程 {threading.current_thread().name} 页面加载超时（IP: {local_ip}），更换IP重试")
-            with lock:
-                cur_fail +=1
+            counter_failed.increment()
+
+            # 更新进度文件
+            update_progress()
+
             # 超时直接强制换IP
             with ip_lock:
                 current_ip = None
                 ip_use_count = 0
         except:
-            # 原有异常处理逻辑保留
+            # 原有异常处理逻辑保留：回退预定名额
+            counter_completed.decrement()
             traceback.print_exc()
-            with lock:
-                cur_fail +=1
-            print("\033[42m", f"❌ 线程 {threading.current_thread().name} 已失败{cur_fail}次,失败超过{int(fail_threshold)}次将强制停止", "\033[0m")
+            counter_failed.increment()
+            print("\033[42m", f"❌ 线程 {threading.current_thread().name} 已失败{counter_failed.get()}次,失败超过{int(fail_threshold)}次将强制停止", "\033[0m")
+
+            # 更新进度文件
+            update_progress()
 
             # 失败时，当前IP使用次数不累计（避免浪费）
             with ip_lock:
                 if current_ip and ip_use_count > 0:
                     ip_use_count -= 1
 
-            if cur_fail >= fail_threshold:
+            if counter_failed.get() >= fail_threshold:
                 logging.critical("失败次数过多，程序强制停止")
                 quit()
         finally:
@@ -687,8 +834,8 @@ if __name__ == "__main__":
         # 初始化全局变量
         target_num = config.get("target_num", 3)
         fail_threshold = config.get("fail_threshold", target_num / 4 + 1)
-        cur_num = 0
-        cur_fail = 0
+        # 注意：我们不再使用cur_num和cur_fail全局变量，而是使用线程安全的计数器
+        # counter_completed和counter_failed已经在文件顶部初始化
 
         # 获取线程数配置
         num_threads = config.get("num_threads", 2)  # 默认双线程

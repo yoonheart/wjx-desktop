@@ -19,10 +19,10 @@
             font-family: 'Arial', sans-serif;
             margin: 0;
         }
-        
+
         .card-container {
             width: 100%;
-            max-width: 450px;
+            max-width: 420px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
             border-radius: 12px;
             overflow: hidden;
@@ -172,27 +172,27 @@
             <div class="card-title">大佬刷问卷星系统</div>
             <div class="card-subtitle">大佬都爱用的系统！</div>
         </div>
-        
+
         <!-- 卡片内容 -->
         <div class="card-body">
             <form>
                 <div class="form-group">
                     <label for="wjxUrl" class="form-label">问卷星链接</label>
-                    <input type="url" class="form-control" id="wjxUrl" placeholder="例：https://www.wjx.cn/vm/xxxxxx.aspx" required>
+                    <input type="url" class="form-control" id="wjxUrl" placeholder="例：https://v.wjx.cn/vm/xxxxxx.aspx" required>
                 </div>
 
                 <button type="button" class="btn btn-primary" id="analyzeBtn">
                     <i class="fa fa-search" aria-hidden="true"></i> 开始解析
                 </button>
             </form>
-            
+
             <!-- 免责声明 -->
             <div class="disclaimer">
                 <p class="disclaimer-text">本工具仅用于技术研究和学习，不得用于任何非法用途或商业活动。使用本工具产生的一切后果由使用者自行承担，与开发者无关。</p>
             </div>
         </div>
     </div>
-    
+
     <!-- 引入Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <!-- 引入自定义JS -->
@@ -209,15 +209,12 @@
         analyzeBtn.addEventListener('click', function() {
             const url = urlInput.value.trim();
 
-            // 检查URL是否以https://v.wjx.cn开头
-            if (!url.startsWith('https://v.wjx.cn')) {
+            // 检查URL是否以https://v.wjx.cn或https://www.wjx.cn开头
+            if (!url.startsWith('https://v.wjx.cn') && !url.startsWith('https://www.wjx.cn')) {
                 // 调用不阻塞提示
                 showAlert('给我喂的什么链接，是不是给错了', 'error');
                 return;
             }
-
-            // 清除输入框内容
-            urlInput.value = '';
 
             // 直接跳转到analysis.jsp页面并传递问卷星URL
             const encodedUrl = encodeURIComponent(url);

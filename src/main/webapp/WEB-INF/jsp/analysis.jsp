@@ -316,20 +316,25 @@
                 <!-- 目标份数 -->
                 <div style="display: flex; align-items: center; margin-right: 20px;">
                     <label for="targetCount" style="margin-right: 10px; font-weight: bold;">目标份数:</label>
-                    <input type="number" id="targetCount" class="form-control" min="10" max="200" value="10" style="width: 100px; margin-right: 10px;">
+                    <input type="number" id="targetCount" class="form-control" min="1" max="1000" value="1" style="width: 100px; margin-right: 10px;">
                     <span style="color: #666;">份</span>
                 </div>
-                
+
                 <!-- 系统使用须知按钮 -->
                 <button type="button" class="btn btn-sm btn-primary" id="usageIntroBtn">
                     <i class="fa fa-book" aria-hidden="true"></i> 系统使用须知
                 </button>
-                
+
                 <!-- 一键随机概率按钮 -->
                 <button type="button" class="btn btn-sm btn-warning" id="randomProbBtn">
                     <i class="fa fa-random" aria-hidden="true"></i> 一键随机概率
                 </button>
-                
+
+                <!-- 详细设置按钮 -->
+                <button type="button" class="btn btn-sm" id="detailSettingsBtn" style="background-color: #7952b3; color: #fff; border: none;">
+                    <i class="fa fa-cog" aria-hidden="true"></i> 功能详细设置
+                </button>
+
                 <!-- 历史运行结果按钮 -->
                 <button type="button" class="btn btn-sm btn-info" id="historyBtn">
                     <i class="fa fa-history" aria-hidden="true"></i> 历史运行结果
@@ -343,6 +348,35 @@
                 <div class="loading-spinner"></div>
                 <div class="loading-text">请耐心等待约十秒钟，正在解析问卷内容...</div>
             </div>
+        </div>
+
+        <!-- 进度面板 -->
+        <div id="progressPanel" style="display: none; padding: 60px 30px; text-align: center;">
+            <h4 id="progressTitle" class="mb-4" style="color: #28a745;">
+                <i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 正在刷问卷
+            </h4>
+            <div class="progress" style="height: 35px; border-radius: 17px; margin-bottom: 20px;">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%; transition: width 0.4s ease;"></div>
+            </div>
+            <div class="d-flex justify-content-around" style="max-width: 500px; margin: 0 auto 25px;">
+                <div>
+                    <div style="font-size: 13px; color: #666;">已填写</div>
+                    <div style="font-size: 28px; font-weight: bold; color: #28a745;"><span id="completedCount">0</span></div>
+                    <div style="font-size: 13px; color: #666;">份</div>
+                </div>
+                <div>
+                    <div style="font-size: 13px; color: #666;">目标</div>
+                    <div style="font-size: 28px; font-weight: bold; color: #2D3748;"><span id="progressTargetCount">0</span></div>
+                    <div style="font-size: 13px; color: #666;">份</div>
+                </div>
+                <div>
+                    <div style="font-size: 13px; color: #666;">进度</div>
+                    <div style="font-size: 28px; font-weight: bold; color: #1976d2;"><span id="percentDisplay">0</span>%</div>
+                </div>
+            </div>
+            <button type="button" id="stopButton" class="btn btn-danger" style="padding: 8px 40px;">
+                <i class="fa fa-stop" aria-hidden="true"></i> 停止任务
+            </button>
         </div>
 
         <!-- 刷问卷按钮 -->
@@ -456,7 +490,7 @@ window.addEventListener('DOMContentLoaded', function() {
             <p>矩阵题每一行算一个题，一行的概率和为100，如我图中画出的红框</p>
             <br>
             
-            <p>问卷总份数在<span style="color: red; font-weight: bold;">10~200份</span>之间，可以利用 <span style="color: red; font-weight: bold;">一键随机概率按钮</span> 来快速设置概率，两百份问卷大约耗时半个小时</p>
+            <p>问卷总份数在<span style="color: red; font-weight: bold;">1~1000份</span>之间，可以利用 <span style="color: red; font-weight: bold;">一键随机概率按钮</span> 来快速设置概率，一千份问卷大约耗时两个半小时</p>
         </div>
         <button type="button" class="btn btn-primary" style="margin-top: 20px; min-width: 80px;" onclick="document.getElementById('usageIntroModal').style.display = 'none'">关闭</button>
     </div>
@@ -473,6 +507,102 @@ window.addEventListener('DOMContentLoaded', function() {
             <div style="text-align: center; color: #666; padding: 20px;">暂无历史运行记录</div>
         </div>
         <button type="button" class="btn btn-primary" style="margin-top: 20px; min-width: 80px;" onclick="document.getElementById('historyModal').style.display = 'none'">关闭</button>
+    </div>
+</div>
+
+<!-- 详细设置弹窗 -->
+<div id="detailSettingsModal" class="modal">
+    <div class="modal-content" style="width: 560px; border-radius: 12px;">
+        <div style="position: relative; margin-bottom: 20px;">
+            <h5 style="margin: 0; padding-right: 30px; color: #2D3748;">
+                <i class="fa fa-cog" aria-hidden="true"></i> 详细设置
+            </h5>
+            <span class="close" style="position: absolute; top: 0; right: 0;">&times;</span>
+        </div>
+
+        <!-- 设置行样式 -->
+        <style>
+            .setting-row {
+                display: flex;
+                align-items: center;
+                padding: 14px 16px;
+                border-bottom: 1px solid #f0f0f0;
+                gap: 12px;
+            }
+            .setting-row:last-of-type {
+                border-bottom: none;
+            }
+            .setting-row .form-check {
+                margin: 0;
+            }
+            .setting-row .form-check-label {
+                font-weight: 600;
+                color: #2D3748;
+                cursor: pointer;
+            }
+            .setting-row .help-icon {
+                color: #1976d2;
+                cursor: pointer;
+                margin-left: 4px;
+                font-size: 15px;
+            }
+            .setting-row .time-input {
+                width: 75px;
+                padding: 5px 8px;
+                font-size: 13px;
+                text-align: center;
+            }
+            .setting-row .api-input {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+        </style>
+
+        <!-- 无界面模式 -->
+        <div class="setting-row">
+            <div style="display: flex; align-items: center;">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="headlessMode" checked>
+                    <label class="form-check-label" for="headlessMode">无界面模式</label>
+                </div>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true" title="不弹出浏览器窗口"></i>
+            </div>
+        </div>
+
+        <!-- 代理：开关 + 问号 + 输入框同行 -->
+        <div class="setting-row">
+            <div style="display: flex; align-items: center;">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="proxySwitch" checked>
+                    <label class="form-check-label" for="proxySwitch">代理</label>
+                </div>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true" title="开启后使用代理IP刷题，每个IP填写多份问卷"></i>
+            </div>
+            <span id="apiUrlGroup" style="flex: 1; min-width: 0;">
+                <input type="text" class="form-control api-input" id="apiUrl" placeholder="http://..." value="http://bapi.51daili.com/getapi2?linePoolIndex=-1&packid=2&time=11&qty=1&port=1&format=txt&dt=2&ct=1&dtc=2&regionCode=500100&rid=mso0aw2b1yn0b1x60z5s5&uid=72829&accessName=yoonheart&accessPassword=795C48CE03F0EF42D366F095D6F5340E&skey=autoaddwhiteip">
+            </span>
+        </div>
+
+        <!-- 时间控制：开关 + 问号 + 区间输入同行 -->
+        <div class="setting-row">
+            <div style="display: flex; align-items: center;">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="timeControlSwitch">
+                    <label class="form-check-label" for="timeControlSwitch">时间控制</label>
+                </div>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true" title="开启后每份问卷耗时在设定区间内随机，且一个IP只填一份"></i>
+            </div>
+            <span id="timeControlGroup" style="display: none; flex: 1; min-width: 0;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <input type="number" id="minFillTime" class="form-control time-input" min="30" max="150" value="30">
+                    <span style="color: #666;">秒 ~</span>
+                    <input type="number" id="maxFillTime" class="form-control time-input" min="30" max="150" value="150">
+                    <span style="color: #666;">秒</span>
+                </span>
+            </span>
+        </div>
+
+        <button type="button" class="btn btn-primary" style="margin-top: 20px; min-width: 80px;" onclick="document.getElementById('detailSettingsModal').style.display = 'none'">关闭</button>
     </div>
 </div>
 
