@@ -34,3 +34,7 @@ build/
 
 # WorkBuddy
 .workbuddy/
+
+### Python ###
+__pycache__/
+*.py[cod]

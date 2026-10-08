@@ -1,6 +1,7 @@
-<%@ page contentType="text/html;charset=UTF-8" %>
-<html>
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
+    <meta charset="UTF-8">
     <title>问卷解析结果</title>
     <!-- 标签页图标 -->
     <link rel="icon" href="https://java------------ai.oss-cn-beijing.aliyuncs.com/2025/12/1.jpg" type="image/jpg">
@@ -337,7 +338,7 @@
 
                 <!-- 历史运行结果按钮 -->
                 <button type="button" class="btn btn-sm btn-info" id="historyBtn">
-                    <i class="fa fa-history" aria-hidden="true"></i> 历史运行结果
+                    <i class="fa fa-history" aria-hidden="true"></i> 历史运行记录
                 </button>
             </div>
         </div>
@@ -500,7 +501,7 @@ window.addEventListener('DOMContentLoaded', function() {
 <div id="historyModal" class="modal">
     <div class="modal-content" style="width: 500px; max-height: 600px; overflow-y: auto;">
         <div style="position: relative; margin-bottom: 15px;">
-            <h5 style="margin: 0; padding-right: 30px;">历史运行结果</h5>
+            <h5 style="margin: 0; padding-right: 30px;">历史运行记录</h5>
             <span class="close" style="position: absolute; top: 0; right: 0;">&times;</span>
         </div>
         <div id="historyContent" style="margin-top: 20px;">
@@ -607,17 +608,17 @@ window.addEventListener('DOMContentLoaded', function() {
 </div>
 
 <!-- 引入请求工具 -->
-<script src="${pageContext.request.contextPath}/static/js/request.js"></script>
+<script src="/static/js/request.js"></script>
 <!-- 引入API封装 -->
-<script src="${pageContext.request.contextPath}/static/js/api.js"></script>
+<script src="/static/js/api.js"></script>
 <!-- 引入Bootstrap JS -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <!-- 引入自定义JS -->
-<script src="${pageContext.request.contextPath}/static/js/alert.js"></script>
+<script src="/static/js/alert.js"></script>
 <!-- 引入概率检测工具 -->
-<script src="${pageContext.request.contextPath}/static/js/probability-validator.js"></script>
+<script src="/static/js/probability-validator.js"></script>
 <!-- 引入分析页面主逻辑 -->
-<script src="${pageContext.request.contextPath}/static/js/analysis.js"></script>
+<script src="/static/js/analysis.js"></script>
 
 <script>
     // 确认返回首页的函数

@@ -7,11 +7,6 @@ const wjxApi = {
     analyzeUrl(url) {
         return requestUtil.get('/api/analysis', { url: url });
     },
-    
-    // 刷问卷
-    brush(data) {
-        return requestUtil.post('/api/brush', data);
-    },
 
     // 启动刷问卷任务（异步）
     brushStart(data) {

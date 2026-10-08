@@ -2086,4 +2086,9 @@ function restoreAfterTaskEnd() {
 }
 
 // 初始化停止按钮
-document.getElementById('stopButton').addEventListener('click', stopTask);
+// 统一用 onclick 绑定：任务结束/返回配置时会重新赋值 onclick，
+// 若此处改用 addEventListener，两次绑定会叠加，导致 stopTask 被触发两次
+const stopButtonEl = document.getElementById('stopButton');
+if (stopButtonEl) {
+    stopButtonEl.onclick = stopTask;
+}

@@ -1,6 +1,7 @@
 import time
 import re
 import sys
+import os
 from selenium import webdriver
 from selenium.webdriver.edge.options import Options
 from selenium.webdriver.edge.service import Service
@@ -18,7 +19,9 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 # ---------------------- 配置 ----------------------
 # 默认问卷星网址（当没有传入参数时使用）
 DEFAULT_WJX_URL = "https://v.wjx.cn/vm/Qu9AV5R.aspx"
-EDGE_DRIVER_PATH = "D:\python\msedgedriver.exe"  # Edge驱动路径（确保和浏览器版本匹配）
+# Edge 驱动路径（可选）。可通过环境变量 WJX_EDGE_DRIVER 覆盖；
+# 该文件不存在时自动交给 Selenium Manager 解析，避免硬编码路径换机器后失效
+EDGE_DRIVER_PATH = os.environ.get("WJX_EDGE_DRIVER", r"D:\python\msedgedriver.exe")
 
 
 # ----------------------------------------------------------
@@ -39,8 +42,14 @@ def init_browser():
     options.add_experimental_option("prefs", prefs)
 
     try:
-        service = Service(executable_path=EDGE_DRIVER_PATH)
-        driver = webdriver.Edge(service=service, options=options)
+        # 优先使用显式配置的驱动路径；文件不存在时交给 Selenium Manager 自动解析
+        if EDGE_DRIVER_PATH and os.path.exists(EDGE_DRIVER_PATH):
+            service = Service(executable_path=EDGE_DRIVER_PATH)
+            driver = webdriver.Edge(service=service, options=options)
+        else:
+            if EDGE_DRIVER_PATH:
+                print(f"⚠️ 未找到Edge驱动 {EDGE_DRIVER_PATH}，改用 Selenium Manager 自动解析")
+            driver = webdriver.Edge(options=options)
         driver.set_page_load_timeout(20)  # 延长页面加载超时时间
         return driver
     except WebDriverException as e:
@@ -111,7 +120,7 @@ def extract_question_type_with_codes(page_source):
 
     if not question_divs:
         print("❌ 未找到题目容器，可能是页面结构更新")
-        return
+        return []
 
     for q_div in question_divs:
         # 1. 检查是否是"其他"选项的单独div，如果是则跳过

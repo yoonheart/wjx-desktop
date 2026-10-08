@@ -1,28 +1,39 @@
 package top.yoonheart.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import top.yoonheart.model.BrushTask;
 import top.yoonheart.config.PythonExecutor;
+import top.yoonheart.model.BrushTask;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 @Service
 public class BrushTaskManager {
-    // 任务ID -> 任务状态
+
+    private static final Logger log = LoggerFactory.getLogger(BrushTaskManager.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** 进度轮询间隔 */
+    private static final long PROGRESS_POLL_INTERVAL_MS = 500L;
+
+    /** 任务ID -> 任务状态 */
     private final Map<String, BrushTask> tasks = new ConcurrentHashMap<>();
-    // 任务ID -> SseEmitter列表
+    /** 任务ID -> SseEmitter列表 */
     private final Map<String, Set<SseEmitter>> emitters = new ConcurrentHashMap<>();
-    // 线程池用于执行Python脚本
+    /** 线程池用于执行Python脚本 */
     private final ExecutorService executorService = Executors.newCachedThreadPool();
 
     public BrushTask createTask(String taskId, String configJson, String url, int targetCount) {
@@ -44,39 +55,56 @@ public class BrushTaskManager {
         Thread watchdog = startProgressWatcher(task);
 
         try {
-            // 更新配置JSON，添加进度文件路径和停止文件路径
-            String configJson = task.getConfigJson();
-            // 将进度文件路径和停止文件路径添加到配置中（注意Windows路径反斜杠转义）
-            String progressPath = task.getProgressFilePath().replace("\\", "\\\\");
-            String stopPath = task.getStopFilePath().replace("\\", "\\\\");
-            String updatedConfigJson = configJson.substring(0, configJson.length() - 1) +
-                ",\"progress_file\":\"" + progressPath + "\"" +
-                ",\"stop_file\":\"" + stopPath + "\"}";
+            // 把进度文件、停止文件路径并入配置，交给 Python 脚本使用
+            String updatedConfigJson = withRuntimePaths(task);
 
-            // 执行Python脚本
-            String result = PythonExecutor.executePythonScript("./src/main/resources/scripts/wjx2.py", updatedConfigJson);
-
-            // 解析结果并更新任务状态
-            parseAndApplyResult(task, result);
+            // 执行Python脚本（结果通过进度文件回传，此处仅记录输出尾部便于排查）
+            String result = PythonExecutor.executePythonScript(
+                    PythonExecutor.resolveScriptPath("scripts/wjx2.py"), updatedConfigJson);
+            logTail(task.getTaskId(), result);
 
             // 标记任务完成（若用户已手动停止，保持STOPPED状态不被覆盖）
             if (task.getStatus() == BrushTask.TaskStatus.RUNNING) {
                 task.setStatus(BrushTask.TaskStatus.COMPLETED);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("任务 {} 执行失败", task.getTaskId(), e);
             // 用户手动停止不算失败
             if (task.getStatus() == BrushTask.TaskStatus.RUNNING) {
                 task.setStatus(BrushTask.TaskStatus.FAILED);
             }
         } finally {
-            // 停止进度监控线程
             if (watchdog != null) {
                 watchdog.interrupt();
             }
+            // 脚本已退出，最后再读一次进度文件，确保拿到完整结果
+            // （Python 端进度写入有 1 秒节流，退出前会强制写一次）
+            readProgressFile(task);
             // 通知所有监听者任务结束
             notifyTaskCompleted(task);
         }
+    }
+
+    /**
+     * 在配置 JSON 中追加 progress_file 与 stop_file 两个运行时路径。
+     * 通过 Jackson 解析后再序列化，避免手工拼接字符串导致的格式错误。
+     */
+    private String withRuntimePaths(BrushTask task) throws IOException {
+        Map<String, Object> config = MAPPER.readValue(
+                task.getConfigJson(), new TypeReference<Map<String, Object>>() {
+                });
+        config.put("progress_file", task.getProgressFilePath());
+        config.put("stop_file", task.getStopFilePath());
+        return MAPPER.writeValueAsString(config);
+    }
+
+    private void logTail(String taskId, String result) {
+        if (result == null || result.isBlank()) {
+            return;
+        }
+        String[] lines = result.strip().split("\\R");
+        int from = Math.max(0, lines.length - 3);
+        log.info("任务 {} 脚本输出尾部: {}", taskId, String.join(" | ", List.of(lines).subList(from, lines.length)));
     }
 
     /**
@@ -92,21 +120,13 @@ public class BrushTaskManager {
                     }
 
                     // 读取进度文件
-                    File progressFile = new File(task.getProgressFilePath());
-                    if (progressFile.exists()) {
-                        try {
-                            String content = new String(Files.readAllBytes(progressFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
-                            parseProgressFile(task, content);
-                            // 推送进度更新
-                            sendProgressUpdate(task.getTaskId(), task);
-                        } catch (Exception e) {
-                            // 文件可能正在被Python写入（读了一半），忽略本次读取
-                        }
-                    }
+                    readProgressFile(task);
+                    // 推送进度更新
+                    sendProgressUpdate(task.getTaskId(), task);
 
-                    // 每500ms检查一次
-                    Thread.sleep(500);
+                    Thread.sleep(PROGRESS_POLL_INTERVAL_MS);
                 } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                     break;
                 }
             }
@@ -116,85 +136,41 @@ public class BrushTaskManager {
         return watcher;
     }
 
+    /** 读取一次进度文件并更新任务计数（供 watchdog 与任务收尾复用） */
+    private void readProgressFile(BrushTask task) {
+        File progressFile = new File(task.getProgressFilePath());
+        if (!progressFile.exists()) {
+            return;
+        }
+        try {
+            String content = Files.readString(progressFile.toPath(), StandardCharsets.UTF_8);
+            parseProgressFile(task, content);
+        } catch (Exception e) {
+            // 文件可能正在被Python写入（读了一半），忽略本次读取
+            log.trace("进度文件读取失败，跳过本次", e);
+        }
+    }
+
     /**
      * 解析进度文件内容，更新任务状态
      */
     private void parseProgressFile(BrushTask task, String content) {
         try {
-            // 提取completedCount和failedCount
-            String completedStr = extractJsonValue(content, "completedCount");
-            String failedStr = extractJsonValue(content, "failedCount");
-            String targetStr = extractJsonValue(content, "targetCount");
-
-            if (completedStr != null) {
-                task.setCompletedCount(Integer.parseInt(completedStr));
+            Map<String, Object> progress = MAPPER.readValue(
+                    content, new TypeReference<Map<String, Object>>() {
+                    });
+            Object completed = progress.get("completedCount");
+            if (completed instanceof Number number) {
+                task.setCompletedCount(number.intValue());
             }
-            if (failedStr != null) {
-                task.setFailedCount(Integer.parseInt(failedStr));
-            }
-        } catch (Exception e) {
-            // 解析失败，忽略
-        }
-    }
-
-    private void parseAndApplyResult(BrushTask task, String result) {
-        try {
-            // 解析Python脚本输出的JSON结果
-            String[] lines = result.split("\\n");
-            String jsonLine = null;
-
-            for (int i = lines.length - 1; i >= 0; i--) {
-                String line = lines[i].trim();
-                if (line.startsWith("{") && line.endsWith("}")) {
-                    jsonLine = line;
-                    break;
-                }
-            }
-
-            if (jsonLine != null) {
-                // 简单解析JSON（避免引入额外的JSON库）
-                String successCountStr = extractJsonValue(jsonLine, "successCount");
-                String failureCountStr = extractJsonValue(jsonLine, "failureCount");
-
-                if (successCountStr != null) {
-                    task.setCompletedCount(Integer.parseInt(successCountStr));
-                }
-                if (failureCountStr != null) {
-                    task.setFailedCount(Integer.parseInt(failureCountStr));
-                }
+            Object failed = progress.get("failedCount");
+            if (failed instanceof Number number) {
+                task.setFailedCount(number.intValue());
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            // JSON 可能尚未写完，忽略本次解析
+            log.trace("进度文件解析失败，跳过本次", e);
         }
-    }
-
-    private String extractJsonValue(String json, String key) {
-        String pattern = "\"" + key + "\":";
-        int startIndex = json.indexOf(pattern);
-        if (startIndex == -1) return null;
-
-        startIndex += pattern.length();
-        // 跳过空格
-        while (startIndex < json.length() && json.charAt(startIndex) == ' ') {
-            startIndex++;
-        }
-
-        // 查找值的结束位置
-        int endIndex;
-        if (json.charAt(startIndex) == '"') {
-            // 字符串值
-            startIndex++; // 跳过开始引号
-            endIndex = json.indexOf('"', startIndex);
-        } else {
-            // 数字值
-            endIndex = startIndex;
-            while (endIndex < json.length() && (Character.isDigit(json.charAt(endIndex)) || json.charAt(endIndex) == '.')) {
-                endIndex++;
-            }
-        }
-
-        if (endIndex == -1) return null;
-        return json.substring(startIndex, endIndex);
     }
 
     public void registerEmitter(String taskId, SseEmitter emitter) {
@@ -205,8 +181,8 @@ public class BrushTaskManager {
         if (task != null) {
             try {
                 emitter.send(SseEmitter.event()
-                    .name("progress")
-                    .data(task.getProgressJson()));
+                        .name("progress")
+                        .data(task.getProgressJson()));
             } catch (IOException | IllegalStateException e) {
                 // 发送失败说明连接已不可用，静默移除
                 unregisterEmitter(taskId, emitter);
@@ -236,53 +212,61 @@ public class BrushTaskManager {
 
     // 通知任务完成
     private void notifyTaskCompleted(BrushTask task) {
+        // 用户手动停止时，前端在调用停止接口前已主动 sse.close()，连接已断开。
+        // 此时再推送必然触发连接中断异常（Spring 的异步错误处理会将其记录为 ERROR），
+        // 而前端本就自行恢复界面、不依赖这次推送，因此直接跳过。
+        if (task.getStatus() == BrushTask.TaskStatus.STOPPED) {
+            return;
+        }
         sendProgressUpdate(task.getTaskId(), task);
     }
 
     private void sendProgressUpdate(String taskId, BrushTask task) {
         Set<SseEmitter> emitterSet = emitters.get(taskId);
-        if (emitterSet != null) {
-            SseEmitter.SseEventBuilder event = SseEmitter.event()
+        if (emitterSet == null || emitterSet.isEmpty()) {
+            return;
+        }
+
+        SseEmitter.SseEventBuilder event = SseEmitter.event()
                 .name("progress")
                 .data(task.getProgressJson());
 
-            // 创建要移除的发射器列表
-            java.util.List<SseEmitter> toRemove = new java.util.ArrayList<>();
-
-            for (SseEmitter emitter : emitterSet) {
-                try {
-                    emitter.send(event);
-                } catch (IOException e) {
-                    // 客户端已断开连接，静默移除即可（不打印堆栈）
-                    toRemove.add(emitter);
-                } catch (IllegalStateException e) {
-                    // emitter已完成或超时，静默移除
-                    toRemove.add(emitter);
-                }
-            }
-
-            // 移除失效的发射器
-            for (SseEmitter emitter : toRemove) {
-                emitterSet.remove(emitter);
+        List<SseEmitter> toRemove = new ArrayList<>();
+        for (SseEmitter emitter : emitterSet) {
+            try {
+                emitter.send(event);
+            } catch (IOException e) {
+                // 客户端已断开连接，静默移除即可
+                toRemove.add(emitter);
+            } catch (IllegalStateException e) {
+                // emitter已完成或超时，静默移除
+                toRemove.add(emitter);
             }
         }
+        emitterSet.removeAll(toRemove);
     }
 
     // 停止任务
     public void stopTask(String taskId) {
         BrushTask task = tasks.get(taskId);
-        if (task != null) {
-            task.setStatus(BrushTask.TaskStatus.STOPPED);
-
-            // 创建停止标志文件
-            try {
-                File stopFile = new File(task.getStopFilePath());
-                stopFile.createNewFile();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            // 注意：不向SSE推送停止事件——前端主动关闭连接并自行恢复界面，
-            // 此时推送会因连接已断开而引发IOException报错
+        if (task == null) {
+            return;
         }
+        task.setStatus(BrushTask.TaskStatus.STOPPED);
+
+        // 创建停止标志文件
+        try {
+            File stopFile = new File(task.getStopFilePath());
+            if (stopFile.createNewFile()) {
+                log.info("已创建停止标志文件: {}", stopFile.getAbsolutePath());
+            }
+        } catch (IOException e) {
+            log.error("创建停止标志文件失败: {}", task.getStopFilePath(), e);
+        }
+        // 前端在调用本接口前已主动 sse.close()，连接实际上已断开。
+        // 这里直接丢弃该任务的 SSE 连接集合：watchdog 与任务收尾此后都取不到 emitter，
+        // 不会再向已关闭的连接写入，从而避免 IOException（Spring 会将其记为 ERROR）。
+        // 若前端之后重新订阅进度，registerEmitter 会重新创建集合。
+        emitters.remove(taskId);
     }
 }

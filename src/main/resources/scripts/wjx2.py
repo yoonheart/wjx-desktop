@@ -24,6 +24,8 @@ current_ip = None  # 当前使用的IP
 ip_use_count = 0   # 当前IP已使用次数
 ip_max_use = 10    # 从配置读取的单个IP最大使用次数
 ip_lock = threading.Lock()  # IP操作锁
+# 全局强制停止事件：失败次数超过阈值时置位，各线程据此优雅退出（替代原先的 quit() 强杀）
+force_stop = threading.Event()
 
 # 线程安全的计数器，替代全局变量
 class ThreadSafeCounter:
@@ -59,12 +61,30 @@ class ThreadSafeCounter:
 counter_completed = ThreadSafeCounter()
 counter_failed = ThreadSafeCounter()
 
-def update_progress():
-    """原子写入进度文件"""
+_progress_write_lock = threading.Lock()
+_last_progress_write = 0.0
+# 进度写入最小间隔（秒）：避免每完成一份就写一次盘，Java 端 500ms 轮询足够及时
+PROGRESS_WRITE_INTERVAL = 1.0
+
+
+def update_progress(force=False):
+    """原子写入进度文件
+
+    :param force: True 时忽略节流立即写入，用于任务结束等关键节点
+    """
+    global _last_progress_write
+
     progress_file = config.get("progress_file", "progress.json")
     # 如果没有指定进度文件，则不进行进度更新
     if not progress_file:
         return
+
+    # 节流：距离上次写入不足间隔时间则跳过
+    now = time.time()
+    with _progress_write_lock:
+        if not force and now - _last_progress_write < PROGRESS_WRITE_INTERVAL:
+            return
+        _last_progress_write = now
 
     temp_file = progress_file + ".tmp"
     progress_data = {
@@ -86,7 +106,9 @@ def update_progress():
 
 
 def check_stop_flag():
-    """检查是否收到停止信号"""
+    """检查是否收到停止信号（外部停止文件，或内部强制停止事件）"""
+    if force_stop.is_set():
+        return True
     stop_file = config.get("stop_file", "stop.flag")
     # 如果没有指定停止文件，则不进行停止检查
     if not stop_file:
@@ -123,40 +145,6 @@ def zanip():
 
 # ========== 全局配置（从JSON动态加载） ==========
 config = {}
-
-# 线程安全的计数器，替代全局变量
-class ThreadSafeCounter:
-    def __init__(self):
-        self._value = 0
-        self._lock = threading.Lock()
-
-    def increment(self):
-        with self._lock:
-            self._value += 1
-            return self._value
-
-    def get(self):
-        with self._lock:
-            return self._value
-
-    def try_increment(self, limit):
-        """原子操作：仅在未达到上限时递增。返回True表示已递增，False表示已达上限"""
-        with self._lock:
-            if self._value >= limit:
-                return False
-            self._value += 1
-            return True
-
-    def decrement(self):
-        """原子递减（不低于0），用于刷题失败时回退预定名额"""
-        with self._lock:
-            if self._value > 0:
-                self._value -= 1
-            return self._value
-
-# 初始化线程安全计数器
-counter_completed = ThreadSafeCounter()
-counter_failed = ThreadSafeCounter()
 
 # 每个线程独立的开始填写时间（避免多线程互相覆盖）
 thread_local_data = threading.local()
@@ -228,7 +216,8 @@ def single(driver: WebDriver, current):
             r = random.randint(1, len(options))
         else:
             norm_p = normalize_prob(p)
-            assert len(norm_p) == len(options), f"第{current}题参数长度({len(p)})与选项数({len(options)})不匹配！"
+            if len(norm_p) != len(options):
+                raise ValueError(f"第{current}题参数长度({len(p)})与选项数({len(options)})不匹配！")
             r = numpy.random.choice(a=range(1, len(options) + 1), p=norm_p)
 
         # 点击选中选项
@@ -447,7 +436,8 @@ def scale(driver: WebDriver, current):
             b = random.randint(1, len(options))
         else:
             norm_p = normalize_prob(p)
-            assert len(norm_p) == len(options), f"第{current}题参数长度({len(p)})与选项数({len(options)})不匹配！"
+            if len(norm_p) != len(options):
+                raise ValueError(f"第{current}题参数长度({len(p)})与选项数({len(options)})不匹配！")
             b = numpy.random.choice(a=range(1, len(options) + 1), p=norm_p)
 
         driver.find_element(By.CSS_SELECTOR, f"#div{current} > div.scale-div > div > ul > li:nth-child({b})").click()
@@ -457,74 +447,78 @@ def scale(driver: WebDriver, current):
 
 # ========== 刷题逻辑（修复版） ==========
 def brush(driver: WebDriver):
-    current = 0
+    """填写整份问卷（自动逐页翻页），返回 True=已提交，False=未提交"""
     max_question_check = config.get("max_question_check", 200)  # 从配置读取最大检测题号
 
-    while current < max_question_check:
-        current += 1
+    # 循环处理每一页，直到找不到"下一页"按钮为止
+    while True:
+        current = 0
+        while current < max_question_check:
+            current += 1
 
-        # 核心：只处理可见的题目（适配条件逻辑）
-        if not is_question_visible(driver, current):
-            continue
+            # 核心：只处理可见的题目（适配条件逻辑）
+            if not is_question_visible(driver, current):
+                continue
 
-        try:
-            q_type = driver.find_element(By.CSS_SELECTOR, f"#div{current}").get_attribute("type")
+            try:
+                q_type = driver.find_element(By.CSS_SELECTOR, f"#div{current}").get_attribute("type")
 
-            if q_type == "1" or q_type == "2":  # 填空题
-                vacant(driver, current)
-            elif q_type == "3":  # 单选
-                single(driver, current)
-            elif q_type == "4":  # 多选
-                multiple(driver, current)
-            elif q_type == "5":  # 量表题
-                scale(driver, current)
-            elif q_type == "6":  # 矩阵题
-                matrix(driver, current)
-            elif q_type == "7":  # 下拉框
-                droplist(driver, current)
-            elif q_type == "8":  # 滑块题
-                score = random.randint(1, 100)
-                driver.find_element(By.CSS_SELECTOR, f"#q{current}").send_keys(score)
-            elif q_type == "11":  # 排序题
-                reorder(driver, current)
-            else:
-                print(f"第{current}题为不支持题型（类型码：{q_type}），跳过")
+                if q_type == "1" or q_type == "2":  # 填空题
+                    vacant(driver, current)
+                elif q_type == "3":  # 单选
+                    single(driver, current)
+                elif q_type == "4":  # 多选
+                    multiple(driver, current)
+                elif q_type == "5":  # 量表题
+                    scale(driver, current)
+                elif q_type == "6":  # 矩阵题
+                    matrix(driver, current)
+                elif q_type == "7":  # 下拉框
+                    droplist(driver, current)
+                elif q_type == "8":  # 滑块题
+                    score = random.randint(1, 100)
+                    driver.find_element(By.CSS_SELECTOR, f"#q{current}").send_keys(score)
+                elif q_type == "11":  # 排序题
+                    reorder(driver, current)
+                else:
+                    print(f"第{current}题为不支持题型（类型码：{q_type}），跳过")
 
-        except Exception as e:
-            print(f"处理第{current}题时出错: {e}")
-            continue
+            except Exception as e:
+                print(f"处理第{current}题时出错: {e}")
+                continue
 
-    # 翻页/提交逻辑（返回True=已提交，False=未提交）
-    time.sleep(0.5)
-    try:
-        driver.find_element(By.CSS_SELECTOR, "#divNext").click()
+        # 尝试翻到下一页；找不到"下一页"说明已到最后一页
         time.sleep(0.5)
-        return brush(driver)  # 递归处理下一页，返回内层提交结果
-    except:
-        # 已到最后一页：时间控制模式下，先等待目标时长再提交（模拟真人填写耗时）
-        min_fill = config.get("min_fill_time")
-        max_fill = config.get("max_fill_time")
-        fill_start = getattr(thread_local_data, 'fill_start_time', None)
-        if min_fill and max_fill and fill_start:
-            target_duration = random.uniform(float(min_fill), float(max_fill))
-            actual_duration = time.time() - fill_start
-            # 分段等待（每5秒检查一次停止信号）
-            while actual_duration < target_duration:
-                if check_stop_flag():
-                    print("等待期间收到停止信号，放弃提交")
-                    return False
-                chunk = min(5.0, target_duration - actual_duration)
-                time.sleep(chunk)
-                actual_duration = time.time() - fill_start
-            print(f"填写时长{target_duration:.0f}秒，开始提交")
         try:
-            driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
-            submit(driver)
-        except:
-            print("未找到提交按钮，尝试直接提交")
-            submit(driver)
-        # 提交动作已执行，无论页面URL是否变化都视为已提交
-        return True
+            driver.find_element(By.CSS_SELECTOR, "#divNext").click()
+            time.sleep(0.5)
+        except Exception:
+            break
+
+    # 已到最后一页：时间控制模式下，先等待目标时长再提交（模拟真人填写耗时）
+    min_fill = config.get("min_fill_time")
+    max_fill = config.get("max_fill_time")
+    fill_start = getattr(thread_local_data, 'fill_start_time', None)
+    if min_fill and max_fill and fill_start:
+        target_duration = random.uniform(float(min_fill), float(max_fill))
+        actual_duration = time.time() - fill_start
+        # 分段等待（每5秒检查一次停止信号）
+        while actual_duration < target_duration:
+            if check_stop_flag():
+                print("等待期间收到停止信号，放弃提交")
+                return False
+            chunk = min(5.0, target_duration - actual_duration)
+            time.sleep(chunk)
+            actual_duration = time.time() - fill_start
+        print(f"填写时长{target_duration:.0f}秒，开始提交")
+    try:
+        driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
+        submit(driver)
+    except Exception:
+        print("未找到提交按钮，尝试直接提交")
+        submit(driver)
+    # 提交动作已执行，无论页面URL是否变化都视为已提交
+    return True
 
 
 # 提交函数
@@ -554,7 +548,7 @@ def submit(driver: WebDriver):
 
 
 # 运行函数
-def run(xx, yy):
+def run():
     global config, current_ip, ip_use_count, ip_max_use
     target_num = config.get("target_num", 3)
     fail_threshold = config.get("fail_threshold", target_num / 4 + 1)
@@ -708,9 +702,11 @@ def run(xx, yy):
                 if current_ip and ip_use_count > 0:
                     ip_use_count -= 1
 
-            if counter_failed.get() >= fail_threshold:
-                logging.critical("失败次数过多，程序强制停止")
-                quit()
+            if counter_failed.get() >= fail_threshold and not force_stop.is_set():
+                logging.critical("失败次数过多，触发全局停止，等待其他线程优雅退出")
+                # 不再使用 quit() 强杀进程：置位全局事件，各线程在循环开头检查后自行退出，
+                # 保证浏览器驱动能被正常释放
+                force_stop.set()
         finally:
             # 无论成功/失败，都确保关闭浏览器
             try:
@@ -842,16 +838,17 @@ if __name__ == "__main__":
 
         # 启动多线程（加延迟，避免同时竞争）
         threads: list[Thread] = []
-        for i in range(num_threads):
-            x = 50 + i * 60
-            y = 50
-            thread = Thread(target=run, args=(x, y))
+        for _ in range(num_threads):
+            thread = Thread(target=run)
             threads.append(thread)
             time.sleep(0.5)  # 线程启动延迟0.5秒，减少资源竞争
             thread.start()
 
         for thread in threads:
             thread.join()
+
+        # 所有线程已结束，强制写一次最终进度，确保 Java 端读到完整结果
+        update_progress(force=True)
             
     except json.JSONDecodeError as e:
         print(f"JSON解析失败: {e}")

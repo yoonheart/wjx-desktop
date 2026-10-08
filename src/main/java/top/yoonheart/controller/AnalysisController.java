@@ -1,51 +1,36 @@
 package top.yoonheart.controller;
 
-import org.springframework.web.bind.annotation.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 import top.yoonheart.config.PythonExecutor;
 import top.yoonheart.po.Result;
-
-import java.io.UnsupportedEncodingException;
-import java.net.URL;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/api/analysis")
 public class AnalysisController {
 
+    private static final Logger log = LoggerFactory.getLogger(AnalysisController.class);
+
     @GetMapping
-    public Result analysis(String url) throws UnsupportedEncodingException {
+    public Result analysis(String url) {
         // 1. 先校验前端传的url参数非空
         if (url == null || url.trim().isEmpty()) {
             return Result.error("问卷网址不能为空，请检查参数");
         }
 
-            // 2. 获取resources/scripts/scan.py的资源URL（核心：路径要和实际文件一致）
-            URL resourceUrl = getClass().getClassLoader().getResource("scripts/scan.py");
+        try {
+            // 2. 定位脚本真实路径（由 PythonExecutor 统一处理中文/空格/打包进 jar 的情况）
+            String scriptPath = PythonExecutor.resolveScriptPath("scripts/scan.py");
 
-            // 3. 空指针防护：如果找不到脚本，直接返回错误
-            if (resourceUrl == null) {
-                return Result.error("未找到Python脚本，请检查文件路径：src/main/resources/scripts/scan.py");
-            }
-
-            // 4. 解码路径（解决中文/空格/特殊字符导致的路径错误）
-            String scriptPath = URLDecoder.decode(resourceUrl.getPath(), StandardCharsets.UTF_8);
-
-            // 5. 处理Windows系统路径格式
-            if (System.getProperty("os.name").toLowerCase().contains("win")) {
-                // 移除开头的斜杠
-                if (scriptPath.startsWith("/")) {
-                    scriptPath = scriptPath.substring(1);
-                }
-                // 将正斜杠转换为反斜杠
-                scriptPath = scriptPath.replace("/", "\\");
-            }
-
-            // 5. 执行Python脚本（增加异常捕获，避免脚本执行失败导致接口崩溃）
+            // 3. 执行Python脚本并返回结果
             String result = PythonExecutor.executePythonScript(scriptPath, url);
-
-            // 6. 返回执行结果
             return Result.success(result);
-
+        } catch (Exception e) {
+            log.error("问卷解析失败: {}", url, e);
+            return Result.error("问卷解析失败: " + e.getMessage());
+        }
     }
 }
