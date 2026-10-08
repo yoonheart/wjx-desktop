@@ -10,6 +10,21 @@ let textAnswersConfig = {};
 // 将textAnswersConfig暴露到全局作用域，供概率验证器使用
 window.textAnswersConfig = textAnswersConfig;
 
+/**
+ * 统一的显隐开关：所有面板/按钮的显示与隐藏都走 .is-hidden 这一个类。
+ * 之前 JS 里散落着几十处 style.display = 'block' / 'none'，
+ * 与 CSS 的 .is-hidden 并存，两套机制容易互相打架。
+ * @param {Element|string} target 元素或元素 id
+ * @param {boolean} visible 是否显示
+ */
+function setVisible(target, visible) {
+    const el = typeof target === 'string' ? document.getElementById(target) : target;
+    if (el) {
+        el.classList.toggle('is-hidden', !visible);
+    }
+    return el;
+}
+
 // 页面加载完成后执行
     document.addEventListener('DOMContentLoaded', function() {
         // 清空文本答案配置，确保每次刷新都是新的开始
@@ -20,7 +35,7 @@ window.textAnswersConfig = textAnswersConfig;
         const apiUrlGroup = document.getElementById('apiUrlGroup');
         if (proxySwitch && apiUrlGroup) {
             proxySwitch.addEventListener('change', function() {
-                apiUrlGroup.style.display = proxySwitch.checked ? 'flex' : 'none';
+                setVisible(apiUrlGroup, proxySwitch.checked);
             });
         }
 
@@ -29,7 +44,7 @@ window.textAnswersConfig = textAnswersConfig;
         const timeControlGroup = document.getElementById('timeControlGroup');
         if (timeControlSwitch && timeControlGroup) {
             timeControlSwitch.addEventListener('change', function() {
-                timeControlGroup.style.display = timeControlSwitch.checked ? 'flex' : 'none';
+                setVisible(timeControlGroup, timeControlSwitch.checked);
             });
         }
 
@@ -37,7 +52,7 @@ window.textAnswersConfig = textAnswersConfig;
         const detailSettingsBtn = document.getElementById('detailSettingsBtn');
         if (detailSettingsBtn) {
             detailSettingsBtn.addEventListener('click', function() {
-                document.getElementById('detailSettingsModal').style.display = 'block';
+                document.getElementById('detailSettingsModal').classList.add('is-open');
             });
         }
 
@@ -115,85 +130,89 @@ window.textAnswersConfig = textAnswersConfig;
         // 调用封装好的API获取解析结果
         api.wjx.analyzeUrl(wjxUrl)
             .then(data => {
-                // 解析结果
-                let questions = [];
-                
+                const analysisContent = document.getElementById('analysisContent');
+                const systemConfig = document.querySelector('.system-config');
+                const brushBtn = document.getElementById('brushBtn');
+
+                // 后端把脚本 stdout 原样透传回来，正常情况下就是一段 JSON 数组
+                let questions = null;
                 try {
-                    // 尝试解析JSON格式数据
-                    if (typeof data.data === 'string') {
-                        // 如果是字符串，尝试JSON解析
-                        questions = JSON.parse(data.data);
-                    } else if (Array.isArray(data.data)) {
-                        // 如果已经是数组，直接使用
-                        questions = data.data;
-                    }
+                    questions = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
                 } catch (e) {
-                    // JSON解析失败，尝试使用旧的文本解析方式
-                    console.log('JSON解析失败，尝试使用文本解析方式', e);
-                    const resultText = data.data || '';
-                    questions = parseQuestions(resultText);
+                    console.error('后端返回的题目数据不是合法 JSON:', e);
                 }
-                
+
+                // 数据格式不对：给出明确提示，而不是静默卡在「解析中」
+                if (!Array.isArray(questions)) {
+                    analysisContent.innerHTML = '<div class="state-msg is-error">问卷解析结果格式异常，无法识别题目结构，请重试或更换链接</div>';
+                    setVisible(systemConfig, false);
+                    setVisible(brushBtn, false);
+                    return;
+                }
+
                 // 检查是否解析到题目
                 if (questions.length === 0) {
                     // 没有解析到题目，显示错误信息
-                    const analysisContent = document.getElementById('analysisContent');
-                    analysisContent.innerHTML = '<div style="color: red; font-weight: bold; text-align: center; margin-top: 50px;">问卷星链接有误，请检查链接</div>';
-                    
+                    analysisContent.innerHTML = '<div class="state-msg is-error">问卷星链接有误，请检查链接</div>';
+
                     // 隐藏系统配置和刷问卷按钮
-                    document.querySelector('.system-config').style.display = 'none';
-                    document.getElementById('brushBtn').style.display = 'none';
-                    
+                    setVisible(systemConfig, false);
+                    setVisible(brushBtn, false);
+
                     return;
                 }
-                
-                // 检查是否有不支持的题型
+
+                // 检查是否有不支持的题型，并把具体题目号点出来
                 const supportedTypes = ['单选题', '多选题', '填空题', '矩阵题', '量表题', '排序题'];
-                const hasUnsupportedType = questions.some(question => {
+                const unsupported = questions.filter(question => {
                     const type = question.题型 || question.type;
                     return !supportedTypes.includes(type);
                 });
-                
-                if (hasUnsupportedType) {
+
+                if (unsupported.length > 0) {
                     // 存在不支持的题型，显示错误信息
-                    const analysisContent = document.getElementById('analysisContent');
-                    analysisContent.innerHTML = '<div style="color: red; font-weight: bold; text-align: center; margin-top: 50px;">目前系统只支持单选，多选，填空，矩阵，量表，排序这六种题型，请检查您的问卷是否存在其他题型，如果确有其余题型需求，请联系管理员</div>';
-                    
+                    const detail = unsupported
+                        .map(question => '第' + (question.题号 || '?') + '题（' + (question.题型 || question.type || '未知') + '）')
+                        .join('、');
+                    analysisContent.innerHTML = '<div class="state-msg is-error">目前系统只支持单选，多选，填空，矩阵，量表，排序这六种题型。<br>无法处理的题目：'
+                        + detail
+                        + '。<br>请检查您的问卷是否存在其他题型，如果确有其余题型需求，请联系管理员</div>';
+
                     // 隐藏系统配置和刷问卷按钮
-                    document.querySelector('.system-config').style.display = 'none';
-                    document.getElementById('brushBtn').style.display = 'none';
-                    
+                    setVisible(systemConfig, false);
+                    setVisible(brushBtn, false);
+
                     return;
                 }
-                
+
                 // 解析成功，先显示系统配置和刷问卷按钮
-                document.querySelector('.system-config').style.display = 'block';
-                document.getElementById('brushBtn').style.display = 'block';
-                
+                setVisible(systemConfig, true);
+                setVisible(brushBtn, true);
+
                 // 然后显示解析结果
                 displayQuestions(questions);
-                
+
                 // 触发questionsLoaded事件，通知概率验证器初始化实时验证
                 window.dispatchEvent(new Event('questionsLoaded'));
             })
             .catch(error => {
                 // 显示错误信息
                 const analysisContent = document.getElementById('analysisContent');
-                analysisContent.innerHTML = '<div style="color: red; font-weight: bold;">解析失败：' + error.message + '</div>';
+                analysisContent.innerHTML = '<div class="state-msg is-error">解析失败：' + error.message + '</div>';
                 console.error('解析错误:', error);
-                
+
                 // 解析失败，隐藏系统配置和刷问卷按钮
-                document.querySelector('.system-config').style.display = 'none';
-                document.getElementById('brushBtn').style.display = 'none';
+                setVisible(document.querySelector('.system-config'), false);
+                setVisible('brushBtn', false);
             });
     } else {
         // 没有问卷星URL，显示错误信息
         const analysisContent = document.getElementById('analysisContent');
-        analysisContent.innerHTML = '<div style="color: red; font-weight: bold;">未获取到问卷星URL参数</div>';
-        
+        analysisContent.innerHTML = '<div class="state-msg is-error">未获取到问卷星URL参数</div>';
+
         // 没有问卷星URL，隐藏系统配置和刷问卷按钮
-        document.querySelector('.system-config').style.display = 'none';
-        document.getElementById('brushBtn').style.display = 'none';
+        setVisible(document.querySelector('.system-config'), false);
+        setVisible('brushBtn', false);
     }
     
     // 关闭弹窗 - 通用逻辑
@@ -202,7 +221,7 @@ window.textAnswersConfig = textAnswersConfig;
         closeBtns[i].onclick = function() {
             const modal = this.closest('.modal');
             if (modal) {
-                modal.style.display = 'none';
+                modal.classList.remove('is-open');
             }
         };
     }
@@ -214,7 +233,7 @@ window.textAnswersConfig = textAnswersConfig;
     if (usageIntroBtn) {
         usageIntroBtn.addEventListener('click', function() {
             const modal = document.getElementById('usageIntroModal');
-            modal.style.display = 'block';
+            modal.classList.add('is-open');
         });
     }
 
@@ -234,7 +253,7 @@ window.textAnswersConfig = textAnswersConfig;
             // 更新历史记录弹窗内容
             updateHistoryModal();
             const modal = document.getElementById('historyModal');
-            modal.style.display = 'block';
+            modal.classList.add('is-open');
         });
     }
     
@@ -259,7 +278,9 @@ window.textAnswersConfig = textAnswersConfig;
             const url = urlParams.get('url');
             const speedMultiplier = 2; // 默认使用2线程
             // 从页面上的设置项直接读取（仅本次使用）
-            const headless = document.getElementById('headlessMode').checked; // 默认无界面模式
+            // 界面模式开关：勾选=弹出浏览器窗口；默认关闭=无界面（后台静默运行）
+            const guiMode = document.getElementById('guiMode').checked;
+            const headless = !guiMode;
             const useProxy = document.getElementById('proxySwitch').checked; // 默认开启代理
             const ipApiUrl = document.getElementById('apiUrl').value.trim();
             // 时间控制（默认关闭）
@@ -273,11 +294,20 @@ window.textAnswersConfig = textAnswersConfig;
                 maxFillTime = tmp;
             }
 
-            // 弹出确认框
-            const timeTip = timeControl
-                ? `\n时间控制：开启（每份 ${minFillTime}~${maxFillTime} 秒，一个IP只填一份）`
-                : '\n时间控制：关闭';
-            if (confirm(`当前设置参数：\n问卷星链接：${url}\n目标份数：${targetCount}份\n无头模式：${headless ? '开启' : '关闭'}\n代理：${useProxy ? '开启' : '关闭'}${timeTip}\n\n开始后无法停止！！！是否继续？`)) {
+            // 自定义确认对话框（替代阻塞式 confirm），确认后再真正启动任务
+            askConfirm({
+                title: '确认开始任务',
+                rows: [
+                    ['问卷链接', url],
+                    ['目标份数', targetCount + ' 份'],
+                    ['ip代理', useProxy ? '开启' : '关闭'],
+                    ['界面模式', guiMode ? '开启' : '关闭'],
+                    ['时间控制', timeControl ? `${minFillTime} ~ ${maxFillTime} 秒（一个 IP 只填一份）` : '关闭']
+                ],
+                message: '任务开始后无法中途暂停，请确认以上参数无误。',
+                okText: '开始执行'
+            }).then(function (ok) {
+                if (!ok) return;
                 // 收集所有题目配置
                 const questionsConfig = collectQuestionsConfig();
 
@@ -304,52 +334,37 @@ window.textAnswersConfig = textAnswersConfig;
                     };
                     localStorage.setItem('wjxCurrentConfig', JSON.stringify(currentConfig));
                     
-                    // 生成任务ID
-                    const taskId = 'task_' + Date.now();
-                    
-                    // 先添加运行中的历史记录
-                    const runningRecord = {
-                        url: url,
-                        targetCount: targetCount,
-                        speedMultiplier: speedMultiplier,
-                        result: { message: '任务正在运行中...' },
-                        timestamp: new Date().toLocaleString(),
-                        taskId: taskId
-                    };
-                    
-                    // 更新历史记录
-                    let history = JSON.parse(localStorage.getItem('wjxHistory') || '[]');
-                    history.unshift(runningRecord);
-                    if (history.length > 10) {
-                        history = history.slice(0, 10);
-                    }
-                    localStorage.setItem('wjxHistory', JSON.stringify(history));
-                    updateHistoryModal();
-                    
                     // 调用后端API启动异步任务
+                    // 历史记录改到后端确认启动成功之后再写：任务号用后端返回的真实 taskId，
+                    // 启动失败时也不会留下一条假的「运行中」记录
                     api.wjx.brushStart(requestData)
                         .then(response => {
                             if (response.code === 1) {
+                                addHistoryRecord({
+                                    url: url,
+                                    targetCount: targetCount,
+                                    speedMultiplier: speedMultiplier,
+                                    result: { message: '任务正在运行中...' },
+                                    timestamp: new Date().toLocaleString(),
+                                    taskId: response.data.taskId
+                                });
                                 // 启动成功，开始监控进度
                                 startProgressMonitoring(response.data.taskId);
                             } else {
                                 showAlert('任务启动失败: ' + response.msg, 'error');
                                 // 恢复界面
-                                document.getElementById('analysisContent').style.display = 'block';
-                                document.getElementById('brushBtn').style.display = 'block';
+                                setVisible('analysisContent', true);
+                                setVisible('brushBtn', true);
                             }
                         })
                         .catch(error => {
                             console.error('任务启动失败:', error);
                             showAlert('任务启动失败: ' + error.message, 'error');
                             // 恢复界面
-                            document.getElementById('analysisContent').style.display = 'block';
-                            document.getElementById('brushBtn').style.display = 'block';
-
-                            // 清除运行中的任务ID
-                            localStorage.removeItem('wjxRunningTaskId');
+                            setVisible('analysisContent', true);
+                            setVisible('brushBtn', true);
                         });
-                }
+            });
             } else {
                 console.log('验证失败，显示错误信息:', result.errors);
                 // 显示错误信息
@@ -389,15 +404,11 @@ window.textAnswersConfig = textAnswersConfig;
                             targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             
                             // 添加视觉提示，高亮显示目标元素
-                            targetElement.style.border = '2px solid #dc3545';
-                            targetElement.style.boxShadow = '0 0 10px rgba(220, 53, 69, 0.5)';
-                            targetElement.style.transition = 'all 0.3s ease';
+                            targetElement.classList.add('is-invalid');
                             
                             // 3秒后移除视觉提示
                             setTimeout(() => {
-                                targetElement.style.border = '';
-                                targetElement.style.boxShadow = '';
-                                targetElement.style.transition = '';
+                                targetElement.classList.remove('is-invalid');
                             }, 3000);
                         } else {
                             console.log('未找到题目元素:', questionId);
@@ -411,58 +422,87 @@ window.textAnswersConfig = textAnswersConfig;
     }
 });
 
-// 确认返回首页的函数
-function confirmBack() {
-    if (confirm('返回首页后当前页面将会清空，是否返回？')) {
-        history.back();
+/**
+ * 自定义确认对话框，替代阻塞式 window.confirm。
+ * @param {Object}   opts
+ * @param {string}  [opts.title]   标题
+ * @param {Array}   [opts.rows]    参数摘要 [[标签, 值], ...]
+ * @param {string}  [opts.message] 提示正文
+ * @param {string}  [opts.okText]  确认按钮文案
+ * @param {boolean} [opts.danger]  确认按钮是否用危险样式
+ * @returns {Promise<boolean>} 用户是否点击了确认
+ */
+function askConfirm(opts) {
+    opts = opts || {};
+
+    const modal = document.getElementById('confirmModal');
+    const titleEl = document.getElementById('confirmTitle');
+    const listEl = document.getElementById('confirmList');
+    const msgEl = document.getElementById('confirmMessage');
+    const okBtn = document.getElementById('confirmOk');
+    const cancelBtn = document.getElementById('confirmCancel');
+
+    // 兜底：对话框节点缺失时退回原生 confirm
+    if (!modal || !okBtn || !cancelBtn) {
+        return Promise.resolve(window.confirm(opts.message || opts.title || '确认继续？'));
     }
+
+    titleEl.textContent = opts.title || '确认操作';
+
+    listEl.innerHTML = '';
+    const rows = opts.rows || [];
+    rows.forEach(function (row) {
+        const dt = document.createElement('dt');
+        dt.textContent = row[0];
+        const dd = document.createElement('dd');
+        dd.textContent = row[1];
+        listEl.appendChild(dt);
+        listEl.appendChild(dd);
+    });
+    listEl.classList.toggle('is-hidden', rows.length === 0);
+
+    msgEl.textContent = opts.message || '';
+    msgEl.classList.toggle('is-hidden', !opts.message);
+
+    okBtn.textContent = opts.okText || '确认';
+    okBtn.className = 'btn ' + (opts.danger ? 'btn-danger' : 'btn-primary');
+
+    modal.classList.add('is-open');
+
+    return new Promise(function (resolve) {
+        function finish(result) {
+            modal.classList.remove('is-open');
+            modal.onclick = null;
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+        }
+        function onOk() { finish(true); }
+        function onCancel() { finish(false); }
+        function onKey(e) { if (e.key === 'Escape') finish(false); }
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        document.addEventListener('keydown', onKey);
+        // 点击遮罩也视为取消
+        modal.onclick = function (e) { if (e.target === modal) finish(false); };
+
+        okBtn.focus();
+    });
 }
 
-// 解析Python脚本返回的字符串
-function parseQuestions(resultText) {
-    const questions = [];
-    const questionBlocks = resultText.split('============================================================\n');
-    
-    questionBlocks.forEach(block => {
-        if (block.trim() === '') return;
-        
-        const lines = block.split('\n').filter(line => line.trim() !== '');
-        if (lines.length < 2) return;
-        
-        // 解析题号和题型
-        const headerLine = lines[0].trim();
-        const questionNumber = parseInt(headerLine.match(/题号(\d+)/)[1]);
-        const questionType = headerLine.match(/【(.*?)】/)[1];
-        
-        // 解析题目内容
-        const contentLine = lines[1].trim();
-        const questionContent = contentLine.replace('题目内容：', '').trim();
-        
-        // 解析选项
-        const options = [];
-        let isOptionsSection = false;
-        
-        for (let i = 2; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (line === '选项：') {
-                isOptionsSection = true;
-                continue;
-            }
-            
-            if (isOptionsSection && line.startsWith('  ')) {
-                options.push(line.substring(2).trim());
-            }
+// 确认返回首页的函数
+function confirmBack() {
+    askConfirm({
+        title: '返回首页',
+        message: '返回首页后当前页面的配置将会清空。',
+        okText: '确定'
+    }).then(function (ok) {
+        if (ok) {
+            history.back();
         }
-        
-        questions.push({
-            number: questionNumber,
-            type: questionType,
-            content: questionContent,
-            options: options
-        });
     });
-    
-    return questions;
 }
 
 // 显示题目
@@ -938,7 +978,7 @@ function openTextAnswerModal(questionId, optionIndex) {
     }
     
     const modal = document.getElementById('textAnswerModal');
-    modal.style.display = 'block';
+    modal.classList.add('is-open');
 }
 
 // 验证单个文本答案输入
@@ -1149,7 +1189,7 @@ function saveTextAnswers() {
     
     // 关闭弹窗
     const modal = document.getElementById('textAnswerModal');
-    modal.style.display = 'none';
+    modal.classList.remove('is-open');
     
     // 清空表单
     answerList.innerHTML = '';
@@ -1284,26 +1324,6 @@ function collectQuestionsConfig() {
     return config;
 }
 
-// 显示程序运行中界面
-function showRunningInterface() {
-    // 新版：直接显示进度条面板，不再显示文字提示
-    const analysisContent = document.getElementById('analysisContent');
-    const brushBtn = document.getElementById('brushBtn');
-    const progressPanel = document.getElementById('progressPanel');
-
-    // 隐藏分析内容和刷问卷按钮
-    analysisContent.style.display = 'none';
-    brushBtn.style.display = 'none';
-
-    // 显示进度条面板
-    if (progressPanel) {
-        progressPanel.style.display = 'block';
-        // 初始化进度条
-        const targetCount = parseInt(document.getElementById('targetCount').value);
-        document.getElementById('targetCount').textContent = targetCount;
-    }
-}
-
 // 显示程序运行完成界面
 function showCompletedInterface(data) {
     const runningInterface = document.getElementById('runningInterface');
@@ -1312,21 +1332,16 @@ function showCompletedInterface(data) {
     }
     
     const analysisContent = document.getElementById('analysisContent');
-    analysisContent.style.display = 'block';
-    
+    setVisible(analysisContent, true);
+
     // 创建完成界面
     const completedInterface = document.createElement('div');
     completedInterface.id = 'completedInterface';
-    completedInterface.style.textAlign = 'center';
-    completedInterface.style.padding = '30px';
-    completedInterface.style.backgroundColor = '#f8f9fa';
-    completedInterface.style.borderRadius = '8px';
-    
-    // 处理运行结果，只显示最后一次的结果
-    let resultHtml = '';
+    completedInterface.className = 'result-wrap';
+
     let successCount = 0;
     let failedCount = 0;
-    
+
     // 提取成功和失败次数
     if (data.data && data.data.successCount !== undefined) {
         successCount = data.data.successCount;
@@ -1334,65 +1349,7 @@ function showCompletedInterface(data) {
     if (data.data && data.data.failedCount !== undefined) {
         failedCount = data.data.failedCount;
     }
-    
-    // 提取最后一次的运行结果
-    let lastResult = '';
-    if (data.message) {
-        // 如果有message字段，提取最后一次的结果
-        const lines = data.message.split('\n');
-        // 找到最后一次运行的结果
-        let lastRunLines = [];
-        for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (line.includes('已填写') || line.includes('失败')) {
-                lastRunLines.unshift(line);
-                if (lastRunLines.length >= 1) break; // 只取最后一次的结果
-            }
-        }
-        if (lastRunLines.length > 0) {
-            lastResult = lastRunLines.join('\n');
-        } else {
-            lastResult = data.message;
-        }
-    } else if (data.data && data.data.message) {
-        // 如果data中有message字段，提取最后一次的结果
-        const lines = data.data.message.split('\n');
-        let lastRunLines = [];
-        for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (line.includes('已填写') || line.includes('失败')) {
-                lastRunLines.unshift(line);
-                if (lastRunLines.length >= 2) break;
-            }
-        }
-        if (lastRunLines.length > 0) {
-            lastResult = lastRunLines.join('\n');
-        } else {
-            lastResult = data.data.message;
-        }
-    } else {
-        // 如果没有message，尝试提取有用信息
-        if (data.data) {
-            // 检查data中是否有有用的信息
-            if (typeof data.data === 'string') {
-                lastResult = data.data;
-            } else {
-                // 尝试格式化显示
-                lastResult = formatResultData(data.data);
-            }
-        } else {
-            // 显示原始数据的简化版本
-            lastResult = formatResultData(data);
-        }
-    }
-    
-    // 构建结果HTML，居中显示
-    resultHtml = `<div style="display: flex; justify-content: center; margin-top: 20px;">
-                    <div style="text-align: center; background-color: #f0f0f0; padding: 20px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; max-width: 80%;">
-                        ${lastResult}
-                    </div>
-                  </div>`;
-    
+
     // 构建统计信息（不显示失败份数）
     let statsHtml = '';
     if (successCount > 0 || failedCount > 0) {
@@ -1400,16 +1357,16 @@ function showCompletedInterface(data) {
         const targetInput = document.getElementById('targetCount');
         const userTarget = targetInput ? parseInt(targetInput.value) : 0;
         statsHtml = `
-            <div style="margin: 0 auto; padding: 25px; background-color: #f8f9fa; border-radius: 12px; max-width: 380px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
-                <div style="display: flex; justify-content: center; gap: 60px; align-items: center;">
-                    <div style="text-align: center;">
-                        <div style="font-size: 13px; color: #999; margin-bottom: 5px;">成功份数</div>
-                        <div style="font-size: 36px; font-weight: bold; color: #28a745;">${successCount}</div>
+            <div class="result-card">
+                <div class="result-stats">
+                    <div>
+                        <div class="result-stat-label">成功份数</div>
+                        <div class="result-stat-value is-ok">${successCount}</div>
                     </div>
-                    <div style="width: 1px; height: 40px; background-color: #dee2e6;"></div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 13px; color: #999; margin-bottom: 5px;">目标份数</div>
-                        <div style="font-size: 36px; font-weight: bold; color: #2D3748;">${userTarget || (successCount + failedCount)}</div>
+                    <div class="result-divider"></div>
+                    <div>
+                        <div class="result-stat-label">目标份数</div>
+                        <div class="result-stat-value">${userTarget || (successCount + failedCount)}</div>
                     </div>
                 </div>
             </div>
@@ -1417,9 +1374,9 @@ function showCompletedInterface(data) {
     }
     
     completedInterface.innerHTML = `
-        <h3 style="color: #28a745; margin-bottom: 25px;">
+        <div class="result-heading">
             <i class="fa fa-check-circle" aria-hidden="true"></i> 运行结束
-        </h3>
+        </div>
         ${statsHtml}
     `;
     
@@ -1428,147 +1385,19 @@ function showCompletedInterface(data) {
     analysisContent.appendChild(completedInterface);
 }
 
-// 格式化结果数据，提取有用信息
-function formatResultData(data) {
-    if (!data) return '无运行结果';
-    
-    // 检查是否有message字段
-    if (data.message) {
-        return data.message;
-    }
-    
-    // 检查是否有successCount和failedCount（不显示失败份数）
-    if (data.successCount !== undefined || data.failedCount !== undefined) {
-        let result = '';
-        if (data.message) {
-            result += data.message + '\n\n';
-        }
-        result += `成功份数：${data.successCount || 0}\n`;
-        return result;
-    }
-    
-    // 尝试提取字符串类型的信息
-    if (typeof data === 'string') {
-        return data;
-    }
-    
-    // 对于其他类型，返回简化的JSON
-    return JSON.stringify(data, (key, value) => {
-        // 只保留有用的字段
-        if (['message', 'successCount', 'failedCount', 'code', 'msg'].includes(key)) {
-            return value;
-        }
-        // 对于嵌套对象，只保留有意义的字段
-        if (typeof value === 'object' && value !== null) {
-            if (value.message) {
-                return value.message;
-            }
-        }
-        return value;
-    }, 2);
-}
-
-// 返回配置界面
-function backToConfig() {
-    // 移除运行完成界面
-    const completedInterface = document.getElementById('completedInterface');
-    if (completedInterface) {
-        completedInterface.remove();
-    }
-    
-    // 显示分析内容和刷问卷按钮
-    const analysisContent = document.getElementById('analysisContent');
-    const brushBtn = document.getElementById('brushBtn');
-    analysisContent.style.display = 'block';
-    brushBtn.style.display = 'block';
-    
-    // 恢复之前的配置
-    const savedConfig = localStorage.getItem('wjxCurrentConfig');
-    if (savedConfig) {
-        try {
-            const config = JSON.parse(savedConfig);
-            // 恢复系统配置
-            document.getElementById('targetCount').value = config.targetCount;
-            document.getElementById('speedMultiplier').value = config.speedMultiplier;
-            
-            // 恢复题目配置
-            if (config.questionsConfig) {
-                // 恢复文本答案配置
-                const newTextAnswersConfig = {};
-                config.questionsConfig.forEach(question => {
-                    const questionId = question.id;
-                    
-                    // 恢复选项的概率配置
-                    if (question.options && question.options.length > 0) {
-                        const questionContainer = document.querySelector(`[data-question-id="${questionId}"]`);
-                        if (questionContainer) {
-                            question.options.forEach(optionConfig => {
-                                const optionIndex = optionConfig.index;
-                                const probability = optionConfig.probability;
-                                
-                                // 找到对应的概率输入框并恢复值
-                                const optionElements = questionContainer.querySelectorAll('.option-item');
-                                if (optionElements[optionIndex]) {
-                                    const probInput = optionElements[optionIndex].querySelector('.probability-input');
-                                    if (probInput) {
-                                        probInput.value = probability;
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    
-                    // 处理直接的文本答案配置（填空题）
-                    if (question.textAnswers) {
-                        // 对于填空题，使用 `${question.id}_0` 作为键
-                        if (question.type === '填空题') {
-                            const key = `${question.id}_0`;
-                            newTextAnswersConfig[key] = question.textAnswers;
-                        }
-                    }
-                    
-                    // 处理选项级别的文本答案配置（单选题和多选题）
-                    if (question.optionTextAnswers) {
-                        for (const [optionIndex, textAnswers] of Object.entries(question.optionTextAnswers)) {
-                            const key = `${question.id}_${optionIndex}`;
-                            newTextAnswersConfig[key] = textAnswers;
-                        }
-                    }
-                });
-                
-                // 更新全局变量
-                textAnswersConfig = newTextAnswersConfig;
-                window.textAnswersConfig = textAnswersConfig;
-                
-                console.log('恢复文本答案配置:', textAnswersConfig);
-            }
-        } catch (e) {
-            console.error('恢复配置失败:', e);
-        }
-    }
-}
-
-// 更新历史运行记录
-function updateHistoryRecord(record) {
-    // 从localStorage获取历史记录
+/**
+ * 追加一条历史运行记录。
+ * 记录里的 taskId 由调用方传入后端返回的真实任务号，前端不再自己造一个假的。
+ * @param {Object} record 记录内容
+ */
+function addHistoryRecord(record) {
     let history = JSON.parse(localStorage.getItem('wjxHistory') || '[]');
-    
-    // 生成唯一的任务ID
-    const taskId = 'task_' + Date.now();
-    record.taskId = taskId;
-    
-    // 添加新记录到开头
     history.unshift(record);
-    
     // 限制历史记录数量为10条
     if (history.length > 10) {
         history = history.slice(0, 10);
     }
-    
-    // 保存到localStorage
     localStorage.setItem('wjxHistory', JSON.stringify(history));
-    
-    // 更新历史记录弹窗内容
     updateHistoryModal();
 }
 
@@ -1578,15 +1407,15 @@ function updateHistoryModal() {
     const history = JSON.parse(localStorage.getItem('wjxHistory') || '[]');
     
     // 添加清空按钮
-    let html = '<div style="text-align: right; margin-bottom: 15px;"><button type="button" class="btn btn-sm btn-danger" onclick="clearHistory()">清空历史记录</button></div>';
-    
+    let html = '<div class="history-actions"><button type="button" class="btn btn-sm btn-danger" onclick="clearHistory()">清空历史记录</button></div>';
+
     if (history.length === 0) {
-        html += '<div style="text-align: center; color: #666; padding: 20px;">暂无历史运行记录</div>';
+        html += '<div class="state-msg">暂无历史运行记录</div>';
     } else {
         history.forEach((record, index) => {
             html += `
-                <div style="border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
-                    <h6 style="margin-bottom: 10px; color: #007bff;">运行记录 ${index + 1}</h6>
+                <div class="history-item">
+                    <div class="history-item-title">运行记录 ${index + 1}</div>
                     <p><strong>时间：</strong>${record.timestamp}</p>
                     <p><strong>问卷链接：</strong>${record.url}</p>
                     <p><strong>目标份数：</strong>${record.targetCount}份</p>
@@ -1600,14 +1429,20 @@ function updateHistoryModal() {
 
 // 清空历史记录
 function clearHistory() {
-    if (confirm('确定要清空所有历史运行记录吗？此操作不可恢复。')) {
+    askConfirm({
+        title: '清空历史记录',
+        message: '所有历史运行记录将被删除，此操作不可恢复。',
+        okText: '清空',
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
         // 从localStorage中删除历史记录
         localStorage.removeItem('wjxHistory');
         // 更新历史记录弹窗内容
         updateHistoryModal();
         // 显示成功提示
         showAlert('历史记录已清空！', 'success');
-    }
+    });
 }
 
 // 生成随机概率
@@ -1979,9 +1814,9 @@ function startProgressMonitoring(taskId) {
     const progressPanel = document.getElementById('progressPanel');
 
     // 隐藏分析内容和刷问卷按钮，进度面板独占页面（类似之前文字展示的效果）
-    analysisContent.style.display = 'none';
-    brushBtn.style.display = 'none';
-    progressPanel.style.display = 'block';
+    setVisible(analysisContent, false);
+    setVisible(brushBtn, false);
+    setVisible(progressPanel, true);
 
     // 从系统配置获取目标份数（输入框的值）
     const targetCount = parseInt(document.getElementById('targetCount').value);
@@ -2011,7 +1846,7 @@ function startProgressMonitoring(taskId) {
                 document.getElementById('progressBar').style.width = '100%';
                 document.getElementById('percentDisplay').textContent = '100';
                 // 隐藏进度面板
-                document.getElementById('progressPanel').style.display = 'none';
+                setVisible('progressPanel', false);
                 // 将进度数据映射为完成界面期望的格式
                 showCompletedInterface({
                     data: {
@@ -2027,12 +1862,12 @@ function startProgressMonitoring(taskId) {
                 const stopBtn = document.getElementById('stopButton');
                 if (data.status === 'FAILED') {
                     title.innerHTML = '<i class="fa fa-times-circle" aria-hidden="true"></i> 任务失败';
-                    title.style.color = '#dc3545';
-                    bar.classList.remove('bg-success');
-                    bar.classList.add('bg-danger');
+                    title.classList.add('is-failed');
+                    bar.classList.remove('is-done');
+                    bar.classList.add('is-failed');
                 } else {
                     title.innerHTML = '<i class="fa fa-stop-circle" aria-hidden="true"></i> 任务已停止';
-                    title.style.color = '#ffc107';
+                    title.classList.add('is-stopped');
                 }
                 // 按钮变为"返回配置"
                 stopBtn.className = 'btn btn-primary';
@@ -2056,9 +1891,9 @@ function stopTask() {
             method: 'POST'
         }).then(() => {
             // 恢复完整界面：隐藏进度面板，重新显示解析内容和开刷按钮
-            document.getElementById('progressPanel').style.display = 'none';
-            document.getElementById('analysisContent').style.display = 'block';
-            document.getElementById('brushBtn').style.display = 'block';
+            setVisible('progressPanel', false);
+            setVisible('analysisContent', true);
+            setVisible('brushBtn', true);
             showAlert('任务已停止', 'info');
         });
     }
@@ -2066,17 +1901,16 @@ function stopTask() {
 
 // 任务结束（失败/停止）后点击"返回配置"恢复界面
 function restoreAfterTaskEnd() {
-    document.getElementById('progressPanel').style.display = 'none';
-    document.getElementById('analysisContent').style.display = 'block';
-    document.getElementById('brushBtn').style.display = 'block';
+    setVisible('progressPanel', false);
+    setVisible('analysisContent', true);
+    setVisible('brushBtn', true);
     // 重置进度面板状态，方便下次任务
     const title = document.getElementById('progressTitle');
     const bar = document.getElementById('progressBar');
     const stopBtn = document.getElementById('stopButton');
     title.innerHTML = '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 正在刷问卷';
-    title.style.color = '#28a745';
-    bar.classList.remove('bg-danger');
-    bar.classList.add('bg-success');
+    title.classList.remove('is-failed', 'is-stopped');
+    bar.classList.remove('is-failed', 'is-done');
     bar.style.width = '0%';
     document.getElementById('completedCount').textContent = '0';
     document.getElementById('percentDisplay').textContent = '0';

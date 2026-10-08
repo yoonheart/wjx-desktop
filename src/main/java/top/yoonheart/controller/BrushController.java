@@ -19,7 +19,8 @@ import java.util.Map;
  * 刷问卷任务接口。
  *
  * <p>注：原有的「单链接 1000 份上限 + 密钥校验」逻辑已按需求整体移除，
- * 请求参数中的 secretKey 不再被读取。</p>
+ * 请求参数中的 secretKey 不再被读取。全局累计份数上限（原 10000 份）同样已移除，
+ * 现在只保留单个任务的份数范围校验（1~1000 份），总量不设上限。</p>
  */
 @RestController
 @RequestMapping("/api")
@@ -30,10 +31,6 @@ public class BrushController {
     @Autowired
     private BrushTaskManager taskManager;
 
-    /** 全局总刷问卷次数（沿用原有实现，未改并发语义） */
-    private static int TOTAL_COUNT = 0;
-    /** 全局最大总份数 */
-    private static final int MAX_TOTAL_COUNT = 10000;
     /** 单个任务允许的目标份数范围 */
     private static final int MIN_TARGET_COUNT = 1;
     private static final int MAX_TARGET_COUNT = 1000;
@@ -50,9 +47,10 @@ public class BrushController {
     public Result brush(@RequestBody Map<String, Object> requestData) {
         try {
             String url = (String) requestData.get("url");
-            Integer targetCount = (Integer) requestData.get("targetCount");
-            Integer speedMultiplier = (Integer) requestData.get("speedMultiplier");
             Object questions = requestData.get("questions");
+            // 用宽松解析代替 (Integer) 强转：JSON 里出现浮点或数字字符串时不会抛 ClassCastException
+            Integer targetCount = toInt(requestData.get("targetCount"));
+            Integer speedMultiplier = toInt(requestData.get("speedMultiplier"));
 
             if (url == null || url.trim().isEmpty()) {
                 return Result.error("问卷链接不能为空，请重新设置");
@@ -69,11 +67,6 @@ public class BrushController {
             }
             if (speedMultiplier != SUPPORTED_THREADS) {
                 return Result.error("窗口数必须为2，请重新设置");
-            }
-
-            // 检查全局总份数是否达到上限
-            if (TOTAL_COUNT + targetCount > MAX_TOTAL_COUNT) {
-                return Result.error("系统测试份数已达上限，无法继续刷问卷");
             }
 
             String taskId = "task_" + System.currentTimeMillis();
@@ -103,8 +96,8 @@ public class BrushController {
             // 时间控制：开启后每份问卷耗时在区间内随机，且一个IP只填一份
             Boolean timeControl = (Boolean) requestData.get("timeControl");
             if (timeControl != null && timeControl) {
-                int minTime = normalizeFillTime((Integer) requestData.get("minFillTime"), 30);
-                int maxTime = normalizeFillTime((Integer) requestData.get("maxFillTime"), 150);
+                int minTime = normalizeFillTime(toInt(requestData.get("minFillTime")), 30);
+                int maxTime = normalizeFillTime(toInt(requestData.get("maxFillTime")), 150);
                 if (maxTime < minTime) {
                     int tmp = maxTime;
                     maxTime = minTime;
@@ -121,8 +114,6 @@ public class BrushController {
             String configJson = new com.fasterxml.jackson.databind.ObjectMapper()
                     .writeValueAsString(config);
 
-            TOTAL_COUNT += targetCount;
-
             // 启动异步任务
             taskManager.createTask(taskId, configJson, url, targetCount);
 
@@ -131,6 +122,26 @@ public class BrushController {
             log.error("任务启动失败", e);
             return Result.error("任务启动失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 宽松地把请求体里的数值转成 int。
+     *
+     * <p>兼容 JSON 反序列化出的 Integer / Long / Double（取整数部分）以及数字字符串；
+     * 无法识别时返回 null，由调用方给出可读的错误提示，而不是抛 ClassCastException。</p>
+     */
+    private static Integer toInt(Object raw) {
+        if (raw instanceof Number number) {
+            return number.intValue();
+        }
+        if (raw instanceof String text) {
+            try {
+                return Integer.valueOf(text.trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /** 把填写时长限制在 30~150 秒内，非法值回退到默认值 */

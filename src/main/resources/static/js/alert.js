@@ -1,57 +1,89 @@
-// 不阻塞提示函数
-function showAlert(message, type = 'error') {
-    // 创建提示框元素
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `custom-alert custom-alert-${type}`;
-    alertDiv.innerHTML = message;
-    
-    // 设置样式
-    Object.assign(alertDiv.style, {
-        position: 'fixed',
-        top: '20px',
-        left: '50%',
-        transform: 'translate(-50%, 0) scale(0.8)',
-        padding: '12px 24px',
-        borderRadius: '8px',
-        color: 'white',
-        fontSize: '14px',
-        fontWeight: '600',
-        zIndex: '9999',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
-        opacity: '0',
-        transition: 'all 0.3s ease'
-    });
-    
-    // 根据类型设置背景色
-    if (type === 'error') {
-        alertDiv.style.backgroundColor = '#f44336';
-    } else if (type === 'success') {
-        alertDiv.style.backgroundColor = '#4caf50';
-    } else if (type === 'info') {
-        alertDiv.style.backgroundColor = '#2196f3';
+// 右上角消息提示：实心语义色底 + 白色文字 + 图标 + 关闭按钮，自动消失
+// 视觉全部由 app.css 的 .notice-stack / .notice 定义，这里只管挂载与生命周期
+// 注意：类名不用 toast —— Bootstrap 的 .toast:not(.show) 会把元素整个 display:none
+
+const ALERT_ICONS = {
+    success: 'fa-check-circle',
+    error: 'fa-times-circle',
+    info: 'fa-info-circle',
+    warning: 'fa-exclamation-triangle'
+};
+
+// 自动消失时长（毫秒）
+const ALERT_DURATION = 4500;
+// 同时最多保留的提示条数，超出时挤掉最旧的一条
+const ALERT_MAX = 4;
+// 退场动画时长，需与 .toast 的 transition-duration 对齐
+const ALERT_LEAVE_MS = 240;
+
+function getToastStack() {
+    let stack = document.getElementById('noticeStack');
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'noticeStack';
+        stack.className = 'notice-stack';
+        document.body.appendChild(stack);
     }
-    
-    // 添加到页面
-    document.body.appendChild(alertDiv);
-    
-    // 显示动画
-    setTimeout(() => {
-        alertDiv.style.opacity = '1';
-        alertDiv.style.transform = 'translate(-50%, 0) scale(1)';
-    }, 100);
-    
-    // 3秒后自动隐藏
-    setTimeout(() => {
-        alertDiv.style.opacity = '0';
-        alertDiv.style.transform = 'translate(-50%, 0) scale(0.8)';
-        
-        // 动画结束后移除元素
-        setTimeout(() => {
-            if (alertDiv.parentNode) {
-                alertDiv.parentNode.removeChild(alertDiv);
-            }
-        }, 300);
-    }, 3000);
+    return stack;
+}
+
+function showAlert(message, type = 'error') {
+    const stack = getToastStack();
+    const kind = ALERT_ICONS[type] ? type : 'info';
+    const text = String(message == null ? '' : message);
+
+    // 允许同一条消息重复出现：不做去重，直接往下追加
+
+    // 超出上限时挤掉最旧的一条（最上面那条）
+    while (stack.children.length >= ALERT_MAX) {
+        stack.firstElementChild.remove();
+    }
+
+    const el = document.createElement('div');
+    el.className = 'notice is-' + kind;
+    el.dataset.message = text;
+    el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    el.setAttribute('aria-live', kind === 'error' ? 'assertive' : 'polite');
+
+    const icon = document.createElement('i');
+    icon.className = 'fa ' + ALERT_ICONS[kind] + ' notice-icon';
+    icon.setAttribute('aria-hidden', 'true');
+
+    const msg = document.createElement('div');
+    msg.className = 'notice-msg';
+    // 用 textContent 而非 innerHTML：消息里可能含换行，交给 CSS 的 pre-line 处理
+    msg.textContent = text;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'notice-close';
+    closeBtn.setAttribute('aria-label', '关闭提示');
+    closeBtn.innerHTML = '&times;';
+
+    el.appendChild(icon);
+    el.appendChild(msg);
+    el.appendChild(closeBtn);
+
+    let timer = null;
+    let dismissed = false;
+
+    function dismiss() {
+        if (dismissed) return;
+        dismissed = true;
+        if (timer) clearTimeout(timer);
+        el.classList.remove('is-visible');
+        el.classList.add('is-leaving');
+        setTimeout(() => el.remove(), ALERT_LEAVE_MS);
+    }
+
+    closeBtn.addEventListener('click', dismiss);
+
+    // 按时间顺序往下排：新的追加在最下面
+    stack.appendChild(el);
+    // 下一帧再加可见类，保证进场过渡能触发
+    requestAnimationFrame(() => el.classList.add('is-visible'));
+
+    timer = setTimeout(dismiss, ALERT_DURATION);
 }
 
 // 导出函数（如果需要模块使用）

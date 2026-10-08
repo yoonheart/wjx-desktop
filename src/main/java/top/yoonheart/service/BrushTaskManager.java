@@ -2,6 +2,7 @@ package top.yoonheart.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,6 +30,14 @@ public class BrushTaskManager {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     /** 进度轮询间隔 */
     private static final long PROGRESS_POLL_INTERVAL_MS = 500L;
+    /**
+     * 已结束任务的最大保留条数。
+     *
+     * <p>任务记录只用于任务运行期间查询进度，跑完就没有再查的价值了。
+     * 之前 tasks 只增不减，跑得越多占的内存越多，这里给一个上限，
+     * 超出后按开始时间从最旧的已结束任务开始清理。</p>
+     */
+    private static final int MAX_RETAINED_TASKS = 100;
 
     /** 任务ID -> 任务状态 */
     private final Map<String, BrushTask> tasks = new ConcurrentHashMap<>();
@@ -82,7 +92,33 @@ public class BrushTaskManager {
             readProgressFile(task);
             // 通知所有监听者任务结束
             notifyTaskCompleted(task);
+            // 任务已结束，回收该任务的 SSE 连接集合与过期任务记录，避免长时间运行后内存只涨不降
+            emitters.remove(task.getTaskId());
+            pruneFinishedTasks();
         }
+    }
+
+    /** 任务记录超出保留上限时，从最旧的已结束任务（非 RUNNING）开始清理 */
+    private void pruneFinishedTasks() {
+        int overflow = tasks.size() - MAX_RETAINED_TASKS;
+        if (overflow <= 0) {
+            return;
+        }
+        List<BrushTask> finished = tasks.values().stream()
+                .filter(t -> t.getStatus() != BrushTask.TaskStatus.RUNNING)
+                .sorted(Comparator.comparing(BrushTask::getStartTime))
+                .toList();
+        for (int i = 0; i < overflow && i < finished.size(); i++) {
+            String taskId = finished.get(i).getTaskId();
+            tasks.remove(taskId);
+            emitters.remove(taskId);
+        }
+    }
+
+    /** 应用关闭时释放执行 Python 脚本的线程池 */
+    @PreDestroy
+    public void shutdown() {
+        executorService.shutdownNow();
     }
 
     /**

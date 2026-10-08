@@ -50,10 +50,12 @@
     </dependencies>
 
     <build>
+        <!-- 静态资源里没有任何 Maven 占位符（@...@），保持关闭过滤：
+             一是省掉一遍逐文件的扫描，二是避免二进制资源（图片）被当文本处理 -->
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
-                <filtering>true</filtering>
+                <filtering>false</filtering>
             </resource>
         </resources>
         <plugins>

@@ -7,10 +7,5 @@ logging:
     top.yoonheart: INFO
   pattern:
     console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
-  # 控制台日志编码。不配置时 Spring Boot 会跟随 JVM 的 file.encoding，
-  # 一旦它与终端代码页不一致，中文日志就会乱码（英文正常、中文变问号/方块即是此症）。
-  # 本机 JVM 默认 file.encoding=GBK，中文 Windows 终端代码页也是 936(GBK)，故取 GBK。
-  # 若你的终端是 UTF-8（Windows Terminal / chcp 65001 / IDE 控制台设为 UTF-8），
-  # 请把这里改成 UTF-8，并确保启动参数为 -Dfile.encoding=UTF-8。
   charset:
-    console: GBK
+    console: UTF-8

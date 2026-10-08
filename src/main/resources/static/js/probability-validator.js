@@ -182,6 +182,8 @@ const ProbabilityValidator = {
     },
     
     // 验证多选题
+    // 规则与单选题一致（见「系统使用须知」：多选题同单选题）：
+    // 每个选项都要填，且概率之和必须为 100%
     validateMultipleChoice: function(questionId) {
         const errors = [];
         const questionContainer = document.querySelector(`[data-question-id="${questionId}"]`);
@@ -189,6 +191,7 @@ const ProbabilityValidator = {
         
         // 收集所有已填写的概率值
         const probabilities = [];
+        const validInputs = [];
         
         probabilityInputs.forEach((input, index) => {
             // 先移除可能存在的错误样式
@@ -205,45 +208,35 @@ const ProbabilityValidator = {
                     errors.push(`第${questionId}题（多选题）选项${index + 1}的概率必须在0-100之间`);
                     this.showInputError(input);
                 } else {
+                    input.classList.remove('is-invalid');
                     probabilities.push(num);
+                    validInputs.push(input);
                 }
             }
         });
         
-        // 多选题不需要总和为100%，但至少需要填写一个选项的概率
-        if (probabilities.length === 0) {
-            errors.push(`第${questionId}题（多选题）请至少为一个选项填写概率`);
-            // 为所有输入框添加错误样式提示
+        // 检查是否所有选项都填写了概率
+        if (probabilities.length !== probabilityInputs.length) {
+            errors.push(`第${questionId}题（多选题）请为所有选项填写概率`);
             probabilityInputs.forEach(input => {
-                this.showInputError(input);
+                if (!input.value.trim()) {
+                    this.showInputError(input);
+                }
             });
         } else {
-            // 验证通过，确保移除所有错误样式和提示
-            probabilityInputs.forEach(input => {
-                input.classList.remove('is-invalid');
-            });
-            
-            // 移除当前题目的所有浮动错误提示
-            const questionContainer = document.querySelector(`[data-question-id="${questionId}"]`);
-            if (questionContainer) {
-                // 移除通过showQuestionError方法创建的浮动提示
-                const errorId = questionContainer.dataset.errorId;
-                if (errorId) {
-                    const floatError = document.getElementById(errorId);
-                    if (floatError) {
-                        floatError.remove();
-                    }
-                    questionContainer.removeAttribute('data-error-id');
-                }
-                
-                // 移除通过showErrors方法创建的所有浮动提示
-                const floatErrors = document.querySelectorAll('.question-error-float');
-                floatErrors.forEach(error => {
-                    const errorText = error.textContent;
-                    if (errorText.includes(`第${questionId}题`)) {
-                        error.remove();
-                    }
+            // 检查概率总和是否为100%
+            const sum = probabilities.reduce((acc, curr) => acc + curr, 0);
+            if (sum !== 100) {
+                errors.push(`第${questionId}题（多选题）所有选项的概率之和必须为100%，当前总和为${sum}%`);
+                validInputs.forEach(input => {
+                    input.classList.add('is-invalid');
                 });
+            } else {
+                // 验证通过，清掉本题残留的红色横幅
+                validInputs.forEach(input => {
+                    input.classList.remove('is-invalid');
+                });
+                this.clearQuestionError(questionContainer);
             }
         }
         
@@ -254,10 +247,8 @@ const ProbabilityValidator = {
             if (configButton && configButton.textContent.includes('编辑文本答案')) {
                 // 检查是否已配置文本答案
                 const configKey = `${questionId}_${optionIndex}`;
-                console.log('检查多选题选项文本答案配置:', questionId, '选项:', optionIndex + 1, '配置键:', configKey, '配置值:', window.textAnswersConfig ? window.textAnswersConfig[configKey] : '未定义');
                 if (typeof window.textAnswersConfig === 'undefined' || !window.textAnswersConfig[configKey]) {
                     errors.push(`第${questionId}题（多选题）选项${optionIndex + 1}请配置文本答案`);
-                    console.log('多选题选项未配置:', questionId, '选项:', optionIndex + 1);
                 }
             }
         });
@@ -573,47 +564,39 @@ const ProbabilityValidator = {
         };
     },
     
-    // 显示错误信息 - 改为直接在题目附近显示
+    // 显示错误信息（统一走右上角提示）
     showErrors: function(errors) {
-        if (errors.length === 0) return;
-        
-        // 遍历所有题目容器，检查是否有对应错误
-        const questionContainers = document.querySelectorAll('.question-container');
-        questionContainers.forEach(container => {
-            const questionId = container.dataset.questionId;
-            
-            // 查找当前题目的错误
-            const questionErrors = errors.filter(error => 
-                error.includes(`第${questionId}题`)
-            );
-            
-            if (questionErrors.length > 0) {
-                this.showQuestionError(container, questionErrors[0]);
-            }
-        });
+        if (!errors || errors.length === 0) return;
+        this.showQuestionLevelErrors({ isValid: false, errors: errors });
     },
     
-    // 显示题目级别的错误信息（批量）
+    // 显示题目级别的错误信息：每个出错题目挂一条红色浮标 + 汇总一条右上角通知
     showQuestionLevelErrors: function(validationResult) {
         if (validationResult.isValid) return;
         
-        // 移除所有之前的错误提示
+        const errors = validationResult.errors || [];
+        if (errors.length === 0) return;
+        
+        // 清掉上一轮的浮标
         document.querySelectorAll('.question-error-float').forEach(el => el.remove());
         
-        // 遍历所有题目容器，检查是否有对应错误
-        const questionContainers = document.querySelectorAll('.question-container');
-        questionContainers.forEach(container => {
+        // 逐题挂浮标（浮标文本本身带「第X题」，便于其它逻辑按题目清理）
+        document.querySelectorAll('.question-container').forEach(container => {
             const questionId = container.dataset.questionId;
-            
-            // 查找当前题目的错误
-            const questionErrors = validationResult.errors.filter(error => 
-                error.includes(`第${questionId}题`)
-            );
-            
-            if (questionErrors.length > 0) {
-                this.showQuestionError(container, questionErrors[0]);
+            if (!questionId) return;
+            const hit = errors.filter(error => error.includes(`第${questionId}题`));
+            if (hit.length > 0) {
+                this.showQuestionError(container, hit[0]);
             }
         });
+        
+        // 再汇总一条右上角通知
+        if (typeof showAlert === 'function') {
+            const message = errors.length > 1
+                ? `${errors[0]}（另有 ${errors.length - 1} 处问题）`
+                : errors[0];
+            showAlert(message, 'error');
+        }
     },
     
     // 显示单个输入框的错误信息 - 只添加红色边框，不显示嵌入的文本提示
@@ -622,52 +605,40 @@ const ProbabilityValidator = {
         input.classList.add('is-invalid');
     },
     
-    // 显示题目级别的错误信息
-    showQuestionError: function(questionContainer, message) {
-        // 移除之前的错误提示
-        const existingError = questionContainer.querySelector('.question-error-float');
-        if (existingError) {
-            existingError.remove();
+    // 移除某一题的红色横幅（题目改对后调用）
+    clearQuestionError: function(questionContainer) {
+        if (!questionContainer) return;
+        const questionId = questionContainer.dataset.questionId;
+        
+        // 当前实现：横幅在卡片内部
+        questionContainer.querySelectorAll('.question-error-float').forEach(el => el.remove());
+        
+        // 兜底：早期挂在 body 上的浮动块
+        if (questionId) {
+            document.querySelectorAll('.question-error-float').forEach(el => {
+                if (el.dataset.for === questionId) el.remove();
+            });
         }
         
-        // 创建错误提示元素
+        questionContainer.removeAttribute('data-error-id');
+    },
+    
+    // 显示题目级别的错误信息：在题目卡片顶部插一条红色横幅
+    // 横幅在卡片内部、文档流里，所以既不会盖住别的题目，也不会压住右上角通知或弹窗
+    showQuestionError: function(questionContainer, message) {
+        if (!questionContainer) return;
+        
+        // 同题只留一条
+        this.clearQuestionError(questionContainer);
+        
         const errorDiv = document.createElement('div');
-        errorDiv.className = 'question-error-float alert alert-danger';
+        errorDiv.className = 'question-error-float';
         
-        // 设置浮动样式
-        Object.assign(errorDiv.style, {
-            position: 'absolute',
-            zIndex: '1000',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            fontSize: '12px',
-            maxWidth: '300px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
-            opacity: '0',
-            transform: 'translateY(-10px) scale(0.95)',
-            transition: 'all 0.2s ease'
-        });
-        
+        const questionId = questionContainer.dataset.questionId;
+        if (questionId) errorDiv.dataset.for = questionId;
         errorDiv.textContent = message;
         
-        // 获取题目容器的位置信息
-        const rect = questionContainer.getBoundingClientRect();
-        
-        // 设置错误提示位置（在题目容器右上角）
-        errorDiv.style.left = `${rect.right - 300}px`;
-        errorDiv.style.top = `${rect.top + window.scrollY}px`;
-        
-        // 将错误提示添加到body中
-        document.body.appendChild(errorDiv);
-        
-        // 添加到题目容器的data属性中以便后续查找
-        questionContainer.setAttribute('data-error-id', errorDiv.id);
-        
-        // 显示动画
-        setTimeout(() => {
-            errorDiv.style.opacity = '1';
-            errorDiv.style.transform = 'translateY(0) scale(1)';
-        }, 50);
+        questionContainer.insertBefore(errorDiv, questionContainer.firstChild);
     },
     
     // 为所有概率输入框添加实时验证
@@ -691,18 +662,8 @@ const ProbabilityValidator = {
             });
         });
         
-        // 添加表单提交时的验证
-        const brushBtn = document.getElementById('brushBtn');
-        if (brushBtn) {
-            brushBtn.addEventListener('click', (e) => {
-                const result = this.validateAll();
-                if (!result.isValid) {
-                    e.preventDefault();
-                    // 只显示题目级别的错误提示
-                    this.showQuestionLevelErrors(result);
-                }
-            });
-        }
+        // 开刷按钮的校验统一交给 analysis.js 的 brushBtn 逻辑（内部调用 showErrors），
+        // 这里不再重复绑定，避免同一次点击弹出两条提示
     },
     
     // 验证单个输入框
@@ -733,30 +694,8 @@ const ProbabilityValidator = {
         const questionId = questionContainer.dataset.questionId;
         const questionType = questionContainer.querySelector('.question-type').textContent;
         
-        // 移除题目级别的错误提示
-        const errorId = questionContainer.dataset.errorId;
-        if (errorId) {
-            const existingError = document.getElementById(errorId);
-            if (existingError) {
-                existingError.remove();
-            }
-            questionContainer.removeAttribute('data-error-id');
-        }
-        
-        // 查找并移除浮动错误提示
-        const floatErrors = document.querySelectorAll('.question-error-float');
-        floatErrors.forEach(error => {
-            const errorRect = error.getBoundingClientRect();
-            const containerRect = questionContainer.getBoundingClientRect();
-            
-            // 判断错误提示是否属于当前题目
-            if (errorRect.top >= containerRect.top && 
-                errorRect.bottom <= containerRect.bottom && 
-                errorRect.left >= containerRect.left && 
-                errorRect.right <= containerRect.right) {
-                error.remove();
-            }
-        });
+        // 先清掉本题上一轮的浮标，题目改对后就不会留下红色残留
+        this.clearQuestionError(questionContainer);
         
         // 针对不同题型进行验证
         let result;
