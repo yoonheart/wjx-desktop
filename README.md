@@ -200,4 +200,4 @@ If this tool helped you, buying me a milk tea is appreciated — completely opti
 
 <p align="center">
   <img src="src/main/resources/static/pictures/a.png" width="220" alt="微信收款码 / WeChat QR">
-</p>![img](https://img.shields.io/github/v/release/YoonHeart/wjx-desktop?color=e95f6d)
+</p>
