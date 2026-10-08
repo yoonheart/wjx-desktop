@@ -1175,8 +1175,8 @@ input[type="number"]::-webkit-inner-spin-button {
     margin-top: clamp(88px, 21vh, 200px);
 }
 
-/* 免责声明用 auto 外边距顶到最底部 */
-.hero--home .disclaimer {
+/* 底部声明区用 auto 外边距顶到最底部（免费声明 + 免责声明作为一组一起下沉） */
+.hero--home .hero-foot {
     margin-top: auto;
     padding-top: var(--s8);
 }
@@ -1363,6 +1363,18 @@ input[type="number"]::-webkit-inner-spin-button {
     text-wrap: pretty;
 }
 
+/* 免费声明：与下方免责声明同字号，但加粗并压到墨色，作为一句正面承诺单列出来 */
+.disclaimer-free {
+    max-width: 56ch;
+    margin: 0 auto var(--s2);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.7;
+    color: var(--ink);
+    text-align: center;
+    text-wrap: pretty;
+}
+
 @media (max-width: 720px) {
     .url-row { flex-direction: column; }
     .url-row .btn,
@@ -1457,6 +1469,154 @@ input[type="number"]::-webkit-inner-spin-button {
 .modal-body p { margin-bottom: var(--s3); }
 .modal-body p:last-child { margin-bottom: 0; }
 .modal-body strong { color: var(--ink); font-weight: 500; }
+
+/* ============ 右下角赞助悬浮组件 ============ */
+/* 收起态只露一个圆形头像；悬停头像 / 键盘聚焦 / 点击后向上展开收款卡片。
+   z-index 取 950：低于 .modal(1000)，弹窗打开时不会被它压住。
+   注意：卡片必须绝对定位。若让它留在文档流里，.donate 的盒子会被撑到
+   「头像 + 卡片」那么大，鼠标划过卡片原本占位的空白区域也会触发展开。 */
+.donate {
+    position: fixed;
+    right: var(--s5);
+    bottom: var(--s5);
+    z-index: 950;
+    /* 收缩到与头像同尺寸，这样 :hover 的命中范围就只有这一枚圆 */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.donate-fab {
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    overflow: hidden;
+    background: var(--surface);
+    border: 2px solid var(--surface);
+    border-radius: 50%;
+    box-shadow: var(--sh-2);
+    cursor: pointer;
+    transition-property: transform, box-shadow;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+.donate-fab img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.donate-fab:hover { box-shadow: var(--sh-3); transform: translateY(-2px); }
+.donate-fab:active { transform: scale(.96); }
+
+.donate-card {
+    /* 绝对定位挂在头像正上方：不占文档流，因此不会扩大 .donate 的悬停范围 */
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + var(--s3));
+    width: 260px;
+    max-width: calc(100vw - 40px);
+    padding: var(--s4);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    box-shadow: var(--sh-3);
+    /* 收起态：不可见（visibility:hidden 的元素不参与命中测试） */
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px) scale(.96);
+    transform-origin: bottom right;
+    transition-property: opacity, transform, visibility;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+/* 卡片与头像之间那条 12px 缝也补成热区，鼠标从圆往上挪进卡片时不会闪断 */
+.donate-card::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 100%;
+    height: var(--s3);
+}
+
+/* 悬停头像 / 键盘聚焦展开：只在真有指针悬停能力的设备上生效。
+   触屏设备的 :hover 会在点击后一直「粘住」，那类设备统一交给 JS 的 is-open 控制。 */
+@media (hover: hover) and (pointer: fine) {
+    .donate:not(.is-dismissed):hover .donate-card,
+    .donate:not(.is-dismissed):focus-within .donate-card {
+        opacity: 1;
+        visibility: visible;
+        transform: none;
+    }
+}
+
+/* 点击展开（移动端，以及桌面端点过头像后的固定展开态） */
+.donate.is-open .donate-card {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+}
+
+.donate-title {
+    padding-right: var(--s6);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--ink);
+}
+
+.donate-desc {
+    margin: var(--s2) 0 0;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--ink-2);
+    text-wrap: pretty;
+}
+
+/* 收款码：max-width 与 max-height 同时约束，按原比例缩放，矮窗口也不会被顶出屏幕 */
+.donate-qr {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: 42vh;
+    margin: var(--s3) auto 0;
+    border-radius: var(--r-2);
+}
+
+.donate-close {
+    position: absolute;
+    top: var(--s2);
+    right: var(--s2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: 17px;
+    line-height: 1;
+    color: var(--ink-3);
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition-property: color, background-color;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+.donate-close:hover { color: var(--ink); background: var(--surface-3); }
+.donate-close::after { content: ""; position: absolute; inset: -8px; }
+
+@media (max-width: 720px) {
+    .donate { right: var(--s4); bottom: var(--s4); }
+    .donate-fab { width: 48px; height: 48px; }
+    .donate-card { width: 232px; }
+}
 
 
 

@@ -4,8 +4,10 @@
 // 问卷解析相关API
 const wjxApi = {
     // 解析问卷星链接
+    // 后端解析脚本的超时是 120 秒，客户端放到 150 秒：
+    // 这样超时能先由服务端返回可读错误，客户端超时只作为兜底。
     analyzeUrl(url) {
-        return requestUtil.get('/api/analysis', { url: url });
+        return requestUtil.get('/api/analysis', { url: url }, {}, { timeout: 150000 });
     },
 
     // 启动刷问卷任务（异步）

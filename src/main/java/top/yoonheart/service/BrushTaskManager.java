@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import top.yoonheart.config.PythonExecutor;
 import top.yoonheart.model.BrushTask;
+import top.yoonheart.util.LogSanitizer;
 
 import java.io.File;
 import java.io.IOException;
@@ -60,6 +61,11 @@ public class BrushTaskManager {
         return tasks.get(taskId);
     }
 
+    /** 任务是否存在。供 SSE 订阅前判断，避免为无效 taskId 挂上一条永不超时的连接 */
+    public boolean hasTask(String taskId) {
+        return taskId != null && tasks.containsKey(taskId);
+    }
+
     private void executePythonScript(BrushTask task) {
         // 启动进度监控线程（watchdog），定期读取Python写的进度文件
         Thread watchdog = startProgressWatcher(task);
@@ -90,10 +96,11 @@ public class BrushTaskManager {
             // 脚本已退出，最后再读一次进度文件，确保拿到完整结果
             // （Python 端进度写入有 1 秒节流，退出前会强制写一次）
             readProgressFile(task);
-            // 通知所有监听者任务结束
+            // 通知所有监听者任务结束，并主动关闭这批 SSE 连接
             notifyTaskCompleted(task);
-            // 任务已结束，回收该任务的 SSE 连接集合与过期任务记录，避免长时间运行后内存只涨不降
-            emitters.remove(task.getTaskId());
+            completeEmitters(task.getTaskId());
+            // 进度文件与停止标志文件已无用，随任务一起清掉，避免 %TEMP% 越堆越多
+            deleteRuntimeFiles(task);
             pruneFinishedTasks();
         }
     }
@@ -109,9 +116,47 @@ public class BrushTaskManager {
                 .sorted(Comparator.comparing(BrushTask::getStartTime))
                 .toList();
         for (int i = 0; i < overflow && i < finished.size(); i++) {
-            String taskId = finished.get(i).getTaskId();
-            tasks.remove(taskId);
-            emitters.remove(taskId);
+            BrushTask expired = finished.get(i);
+            tasks.remove(expired.getTaskId());
+            completeEmitters(expired.getTaskId());
+            deleteRuntimeFiles(expired);
+        }
+    }
+
+    /**
+     * 主动关闭某个任务的全部 SSE 连接。
+     *
+     * <p>只从 map 里删掉是不够的：SseEmitter 以 0 超时创建（永不超时），
+     * 不 complete 的话服务端的异步请求上下文会一直挂着，等客户端断开才回收。</p>
+     */
+    private void completeEmitters(String taskId) {
+        Set<SseEmitter> emitterSet = emitters.remove(taskId);
+        if (emitterSet == null || emitterSet.isEmpty()) {
+            return;
+        }
+        for (SseEmitter emitter : emitterSet) {
+            try {
+                emitter.complete();
+            } catch (Exception e) {
+                // 连接已断开时 complete 会抛异常，忽略即可
+                log.trace("关闭 SSE 连接失败，忽略", e);
+            }
+        }
+    }
+
+    /** 删除任务运行期产生的进度文件与停止标志文件 */
+    private void deleteRuntimeFiles(BrushTask task) {
+        deleteQuietly(new File(task.getProgressFilePath()));
+        deleteQuietly(new File(task.getStopFilePath()));
+    }
+
+    private void deleteQuietly(File file) {
+        try {
+            if (file.exists() && !file.delete()) {
+                log.debug("临时文件删除失败：{}", file.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            log.debug("临时文件删除异常：{}", file.getAbsolutePath(), e);
         }
     }
 
@@ -140,7 +185,9 @@ public class BrushTaskManager {
         }
         String[] lines = result.strip().split("\\R");
         int from = Math.max(0, lines.length - 3);
-        log.info("任务 {} 脚本输出尾部: {}", taskId, String.join(" | ", List.of(lines).subList(from, lines.length)));
+        String tail = String.join(" | ", List.of(lines).subList(from, lines.length));
+        // 脚本会打印所用的代理 IP，属于用户数据，落日志前先打码
+        log.info("任务 {} 脚本输出尾部: {}", taskId, LogSanitizer.maskIp(tail));
     }
 
     /**
@@ -300,9 +347,10 @@ public class BrushTaskManager {
             log.error("创建停止标志文件失败: {}", task.getStopFilePath(), e);
         }
         // 前端在调用本接口前已主动 sse.close()，连接实际上已断开。
-        // 这里直接丢弃该任务的 SSE 连接集合：watchdog 与任务收尾此后都取不到 emitter，
-        // 不会再向已关闭的连接写入，从而避免 IOException（Spring 会将其记为 ERROR）。
+        // 这里直接回收该任务的 SSE 连接集合：watchdog 与任务收尾此后都取不到 emitter，
+        // 不会再向已关闭的连接写入（否则 Spring 会把 IOException 记为 ERROR）。
+        // 顺带 complete 一下，释放服务端的异步请求上下文。
         // 若前端之后重新订阅进度，registerEmitter 会重新创建集合。
-        emitters.remove(taskId);
+        completeEmitters(taskId);
     }
 }

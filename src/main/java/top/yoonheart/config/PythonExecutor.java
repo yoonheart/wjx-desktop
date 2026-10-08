@@ -2,6 +2,7 @@ package top.yoonheart.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import top.yoonheart.util.LogSanitizer;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -34,6 +35,8 @@ public final class PythonExecutor {
 
     /** 时间控制模式下刷题可能长达 20 小时以上（1000 份 × 150 秒 ÷ 2 线程），设为 48 小时 */
     private static final long TIMEOUT_SECONDS = 172800L;
+    /** 问卷解析（scan.py）的正常耗时在十几秒，给 2 分钟足够，避免脚本卡死时请求长期挂起 */
+    public static final long ANALYSIS_TIMEOUT_SECONDS = 120L;
     /** 优雅终止的等待时间 */
     private static final long KILL_GRACE_SECONDS = 5L;
 
@@ -147,16 +150,28 @@ public final class PythonExecutor {
     // ==================== 执行 ====================
 
     /**
-     * 执行 Python 脚本并返回标准输出。
-     *
-     * <p>当首个参数是 JSON（以 <code>{</code> 开头）时，会先写入临时文件再传递路径，
-     * 以规避 Windows 命令行长度限制；其余情况直接作为命令行参数传入。</p>
+     * 执行 Python 脚本并返回标准输出，超时时间沿用刷题用的 48 小时。
      *
      * @param scriptPath 脚本绝对路径
      * @param args       脚本参数
      * @return 脚本的标准输出
      */
     public static String executePythonScript(String scriptPath, String... args) {
+        return executePythonScript(TIMEOUT_SECONDS, scriptPath, args);
+    }
+
+    /**
+     * 执行 Python 脚本并返回标准输出，可指定超时。
+     *
+     * <p>当首个参数是 JSON（以 <code>{</code> 开头）时，会先写入临时文件再传递路径，
+     * 以规避 Windows 命令行长度限制；其余情况直接作为命令行参数传入。</p>
+     *
+     * @param timeoutSeconds 超时秒数，超时后进程树会被强制结束
+     * @param scriptPath     脚本绝对路径
+     * @param args           脚本参数
+     * @return 脚本的标准输出
+     */
+    public static String executePythonScript(long timeoutSeconds, String scriptPath, String... args) {
         File tempConfigFile = null;
         try {
             List<String> command = new ArrayList<>();
@@ -189,9 +204,9 @@ public final class PythonExecutor {
             Thread outputThread = drainAsync(process.getInputStream(), output);
             Thread errorThread = drainAsync(process.getErrorStream(), errorOutput);
 
-            if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 destroyProcess(process);
-                throw new IllegalStateException("Python脚本执行超时");
+                throw new IllegalStateException("Python脚本执行超时（超过 " + timeoutSeconds + " 秒）");
             }
 
             outputThread.join();
@@ -199,8 +214,10 @@ public final class PythonExecutor {
 
             int exitCode = process.exitValue();
             if (exitCode != 0) {
+                // stderr 里可能带代理 IP，先打码再落日志 / 上抛：
+                // 否则异常沿调用链传播时会被再写一次日志
                 String errorMessage = "Python脚本执行失败，退出码: " + exitCode
-                        + ", 错误信息: " + errorOutput;
+                        + ", 错误信息: " + LogSanitizer.maskIp(errorOutput.toString());
                 log.error(errorMessage);
                 throw new IllegalStateException(errorMessage);
             }
@@ -236,7 +253,7 @@ public final class PythonExecutor {
         return thread;
     }
 
-    /** 分阶段销毁进程：先优雅终止，超时后强制结束 */
+    /** 分阶段销毁进程：先优雅终止，超时后强制结束整棵进程树 */
     private static void destroyProcess(Process process) {
         process.destroy();
         try {
@@ -248,7 +265,10 @@ public final class PythonExecutor {
         }
         if (isWindows()) {
             try {
-                Process killProcess = Runtime.getRuntime().exec("taskkill /F /PID " + process.pid());
+                // 必须带 /T：msedgedriver 与 msedge 是 Python 的子进程，
+                // 只杀 Python 本体的话浏览器会变成孤儿进程一直留在后台
+                Process killProcess = Runtime.getRuntime().exec(
+                        new String[]{"taskkill", "/F", "/T", "/PID", String.valueOf(process.pid())});
                 killProcess.waitFor();
                 return;
             } catch (Exception e) {

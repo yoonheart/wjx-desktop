@@ -56,6 +56,69 @@ function setVisible(target, visible) {
             });
         }
 
+        // 右下角赞助组件：悬停头像即可展开（CSS 负责），这里补点击切换与关闭
+        const donate = document.getElementById('donate');
+        if (donate) {
+            const donateFab = document.getElementById('donateFab');
+            const donateClose = document.getElementById('donateClose');
+
+            // 记录「此刻是不是靠悬停展示的」。桌面端鼠标停在头像上时，
+            // 光靠 :hover 就已经是展开态，只看 is-open 判断不出用户想关掉。
+            let donateHovering = false;
+
+            function syncDonateAria() {
+                const shown = donate.classList.contains('is-open') || donateHovering;
+                donateFab.setAttribute('aria-expanded', String(shown));
+            }
+
+            // 收起：is-dismissed 用来压住「鼠标还停在圆上」时的悬停展开规则，
+            // 否则关完立刻又被 :hover 顶开，看起来像没反应
+            function hideDonate() {
+                donate.classList.remove('is-open');
+                donate.classList.add('is-dismissed');
+                donateHovering = false;
+                syncDonateAria();
+            }
+
+            // 点击头像：已展开（悬停或点开）→ 收起；否则展开
+            donateFab.addEventListener('click', function() {
+                if (donate.classList.contains('is-open') || donateHovering) {
+                    hideDonate();
+                } else {
+                    donate.classList.remove('is-dismissed');
+                    donate.classList.add('is-open');
+                    syncDonateAria();
+                }
+            });
+
+            // 点「×」：收起并记住，之后悬停不再自动弹，只能再点头像打开
+            donateClose.addEventListener('click', hideDonate);
+
+            // 点击组件以外区域收起
+            document.addEventListener('click', function(e) {
+                if (!donate.contains(e.target)) {
+                    donate.classList.remove('is-open');
+                    donateHovering = false;
+                    syncDonateAria();
+                }
+            });
+
+            // 鼠标进出头像：同步悬停标记与 aria
+            donate.addEventListener('mouseenter', function() {
+                if (donate.classList.contains('is-dismissed')) {
+                    return;
+                }
+                donateHovering = true;
+                syncDonateAria();
+            });
+            donate.addEventListener('mouseleave', function() {
+                donateHovering = false;
+                // 离开即解除「本次不再自动展开」，下次悬停恢复正常
+                donate.classList.remove('is-dismissed');
+                syncDonateAria();
+            });
+        }
+
         // 填写区间输入框验证（30~150秒，超出取最小/最大值并提醒，与目标份数逻辑一致）
         const minFillTimeInput = document.getElementById('minFillTime');
         const maxFillTimeInput = document.getElementById('maxFillTime');
@@ -188,6 +251,8 @@ function setVisible(target, visible) {
                 // 解析成功，先显示系统配置和刷问卷按钮
                 setVisible(systemConfig, true);
                 setVisible(brushBtn, true);
+                // 右下角赞助组件只在「解析之后」出现（含后续的开刷/完成界面）
+                setVisible('donate', true);
 
                 // 然后显示解析结果
                 displayQuestions(questions);
@@ -264,11 +329,9 @@ function setVisible(target, visible) {
     const brushBtn = document.getElementById('brushBtn');
     if (brushBtn) {
         brushBtn.addEventListener('click', function() {
-            console.log('点击开刷按钮，开始验证...');
             // 执行概率检测
             const result = ProbabilityValidator.validateAll();
             
-            console.log('验证结果:', result);
             
             if (result.isValid) {
                 // 概率配置合法，可以继续执行刷问卷操作
@@ -366,13 +429,11 @@ function setVisible(target, visible) {
                         });
             });
             } else {
-                console.log('验证失败，显示错误信息:', result.errors);
                 // 显示错误信息
                 ProbabilityValidator.showErrors(result.errors);
                 
                 // 定位到第一个有问题的题目或选项
                 if (result.errors.length > 0) {
-                    console.log('定位到第一个错误:', result.errors[0]);
                     // 从第一个错误信息中提取题目ID和可能的选项索引
                     const firstError = result.errors[0];
                     const questionIdMatch = firstError.match(/第(\d+)题/);
@@ -380,7 +441,6 @@ function setVisible(target, visible) {
                     
                     if (questionIdMatch) {
                         const questionId = questionIdMatch[1];
-                        console.log('定位到题目:', questionId);
                         const questionElement = document.querySelector(`[data-question-id="${questionId}"]`);
                         
                         if (questionElement) {
@@ -389,18 +449,14 @@ function setVisible(target, visible) {
                             // 如果错误信息中包含选项索引，尝试定位到具体选项
                             if (optionIndexMatch) {
                                 const optionIndex = parseInt(optionIndexMatch[1]) - 1; // 转换为0-based索引
-                                console.log('定位到选项索引:', optionIndex);
                                 const optionElements = questionElement.querySelectorAll('.option-item');
-                                console.log('题目选项数量:', optionElements.length);
                                 
                                 if (optionElements.length > optionIndex) {
                                     targetElement = optionElements[optionIndex];
-                                    console.log('成功定位到选项元素');
                                 }
                             }
                             
                             // 滚动到目标元素位置
-                            console.log('滚动到目标元素');
                             targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             
                             // 添加视觉提示，高亮显示目标元素
@@ -410,11 +466,7 @@ function setVisible(target, visible) {
                             setTimeout(() => {
                                 targetElement.classList.remove('is-invalid');
                             }, 3000);
-                        } else {
-                            console.log('未找到题目元素:', questionId);
                         }
-                    } else {
-                        console.log('无法从错误信息中提取题目ID:', firstError);
                     }
                 }
             }
@@ -1121,8 +1173,8 @@ function saveTextAnswers() {
             errors.push(`第${i + 1}个文本答案的概率不能为空`);
             probabilityInput.classList.add('is-invalid');
         } else {
-            const probability = parseInt(probabilityValue);
-            if (isNaN(probability)) {
+            const probability = ProbabilityValidator.parseProbability(probabilityValue);
+            if (probability === null) {
                 errors.push(`第${i + 1}个文本答案的概率不是有效数字`);
                 probabilityInput.classList.add('is-invalid');
             } else if (probability < 0 || probability > 100) {
@@ -1132,10 +1184,11 @@ function saveTextAnswers() {
         }
         
         // 如果当前项验证通过，添加到答案列表
-        if (text !== '' && probabilityValue !== '' && !isNaN(parseInt(probabilityValue))) {
+        const parsedProbability = ProbabilityValidator.parseProbability(probabilityValue);
+        if (text !== '' && probabilityValue !== '' && parsedProbability !== null) {
             answers.push({
                 text: text,
-                probability: parseInt(probabilityValue)
+                probability: parsedProbability
             });
         }
     }
@@ -1177,12 +1230,6 @@ function saveTextAnswers() {
     // 同时更新全局变量，确保概率验证器能够读取到最新配置
     window.textAnswersConfig = textAnswersConfig;
     
-    console.log('保存文本答案:', {
-        questionId: currentQuestionId,
-        optionIndex: currentOptionIndex,
-        answers: answers
-    });
-    console.log('当前所有文本答案配置:', textAnswersConfig);
     
     // 保存成功提示
     showAlert('文本答案配置成功！', 'success');
@@ -1405,26 +1452,53 @@ function addHistoryRecord(record) {
 function updateHistoryModal() {
     const historyContent = document.getElementById('historyContent');
     const history = JSON.parse(localStorage.getItem('wjxHistory') || '[]');
-    
-    // 添加清空按钮
-    let html = '<div class="history-actions"><button type="button" class="btn btn-sm btn-danger" onclick="clearHistory()">清空历史记录</button></div>';
+
+    // 骨架可以用 innerHTML，但问卷链接来自 URL 参数，必须用 textContent 写入：
+    // 直接拼 innerHTML 的话，/analysis?url=<img onerror=...> 这种会被当标记执行。
+    historyContent.innerHTML = '';
+
+    const actions = document.createElement('div');
+    actions.className = 'history-actions';
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'btn btn-sm btn-danger';
+    clearBtn.textContent = '清空历史记录';
+    clearBtn.addEventListener('click', clearHistory);
+    actions.appendChild(clearBtn);
+    historyContent.appendChild(actions);
 
     if (history.length === 0) {
-        html += '<div class="state-msg">暂无历史运行记录</div>';
-    } else {
-        history.forEach((record, index) => {
-            html += `
-                <div class="history-item">
-                    <div class="history-item-title">运行记录 ${index + 1}</div>
-                    <p><strong>时间：</strong>${record.timestamp}</p>
-                    <p><strong>问卷链接：</strong>${record.url}</p>
-                    <p><strong>目标份数：</strong>${record.targetCount}份</p>
-                </div>
-            `;
-        });
+        const empty = document.createElement('div');
+        empty.className = 'state-msg';
+        empty.textContent = '暂无历史运行记录';
+        historyContent.appendChild(empty);
+        return;
     }
-    
-    historyContent.innerHTML = html;
+
+    history.forEach((record, index) => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+
+        const title = document.createElement('div');
+        title.className = 'history-item-title';
+        title.textContent = '运行记录 ' + (index + 1);
+        item.appendChild(title);
+
+        [
+            ['时间：', record.timestamp],
+            ['问卷链接：', record.url],
+            ['目标份数：', (record.targetCount === undefined || record.targetCount === null ? 0 : record.targetCount) + '份']
+        ].forEach(pair => {
+            const p = document.createElement('p');
+            const label = document.createElement('strong');
+            label.textContent = pair[0];
+            p.appendChild(label);
+            p.appendChild(document.createTextNode(pair[1] === undefined || pair[1] === null ? '' : String(pair[1])));
+            item.appendChild(p);
+        });
+
+        historyContent.appendChild(item);
+    });
 }
 
 // 清空历史记录

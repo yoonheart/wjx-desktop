@@ -1,5 +1,20 @@
 // 问卷星概率验证器
 const ProbabilityValidator = {
+    /**
+     * 严格解析概率：整串必须都是数字（允许负号，交给范围校验给出准确提示）。
+     * parseInt 会把 "50abc" 当成 50、"1e2" 当成 1、"50.5" 当成 50，让非法输入蒙混过关。
+     * @param {string} raw 输入框里的原始文本
+     * @returns {number|null} 解析结果；不是纯数字时返回 null
+     */
+    parseProbability: function(raw) {
+        const text = String(raw).trim();
+        if (!/^-?\d+$/.test(text)) {
+            return null;
+        }
+        const num = Number(text);
+        return Number.isSafeInteger(num) ? num : null;
+    },
+
     // 验证所有题目
     validateAll: function() {
         const errors = [];
@@ -7,7 +22,6 @@ const ProbabilityValidator = {
         // 获取所有题目容器
         const questionContainers = document.querySelectorAll('.question-container');
         
-        console.log('开始验证所有题目，共找到', questionContainers.length, '个题目');
         
         if (questionContainers.length === 0) {
             errors.push('未找到题目容器，请确保问卷已正确解析');
@@ -21,7 +35,6 @@ const ProbabilityValidator = {
             const questionId = container.dataset.questionId;
             const questionType = container.querySelector('.question-type').textContent;
             
-            console.log('验证题目:', questionId, '类型:', questionType);
             
             let result;
             switch(questionType) {
@@ -41,19 +54,14 @@ const ProbabilityValidator = {
                     result = this.validateScale(questionId);
                     break;
                 default:
-                    console.log('跳过未知题型:', questionType);
                     result = { isValid: true, errors: [] };
             }
             
             if (!result.isValid) {
-                console.log('题目', questionId, '验证失败，错误:', result.errors);
                 errors.push(...result.errors);
-            } else {
-                console.log('题目', questionId, '验证通过');
             }
         });
         
-        console.log('验证完成，共发现', errors.length, '个错误');
         
         // 检查是否所有验证都通过
         const isValid = errors.length === 0;
@@ -95,8 +103,8 @@ const ProbabilityValidator = {
             
             const value = input.value.trim();
             if (value) {
-                const num = parseInt(value);
-                if (isNaN(num)) {
+                const num = this.parseProbability(value);
+                if (num === null) {
                     errors.push(`第${questionId}题（单选题）选项${index + 1}的概率不是有效数字`);
                     this.showInputError(input);
                 } else if (num < 0 || num > 100) {
@@ -167,10 +175,8 @@ const ProbabilityValidator = {
             if (configButton && configButton.textContent.includes('编辑文本答案')) {
                 // 检查是否已配置文本答案
                 const configKey = `${questionId}_${optionIndex}`;
-                console.log('检查单选题选项文本答案配置:', questionId, '选项:', optionIndex + 1, '配置键:', configKey, '配置值:', window.textAnswersConfig ? window.textAnswersConfig[configKey] : '未定义');
                 if (typeof window.textAnswersConfig === 'undefined' || !window.textAnswersConfig[configKey]) {
                     errors.push(`第${questionId}题（单选题）选项${optionIndex + 1}请配置文本答案`);
-                    console.log('单选题选项未配置:', questionId, '选项:', optionIndex + 1);
                 }
             }
         });
@@ -200,8 +206,8 @@ const ProbabilityValidator = {
             
             const value = input.value.trim();
             if (value) {
-                const num = parseInt(value);
-                if (isNaN(num)) {
+                const num = this.parseProbability(value);
+                if (num === null) {
                     errors.push(`第${questionId}题（多选题）选项${index + 1}的概率不是有效数字`);
                     this.showInputError(input);
                 } else if (num < 0 || num > 100) {
@@ -266,11 +272,9 @@ const ProbabilityValidator = {
         
         // 检查是否已配置文本答案
         const configKey = `${questionId}_0`; // 填空题通常只有一个配置项，索引为0
-        console.log('验证填空题:', questionId, '配置键:', configKey, '配置值:', window.textAnswersConfig ? window.textAnswersConfig[configKey] : '未定义');
         
         if (typeof window.textAnswersConfig === 'undefined' || !window.textAnswersConfig[configKey]) {
             errors.push(`第${questionId}题（填空题）请配置文本答案`);
-            console.log('填空题未配置:', questionId);
         } else {
             // 配置已存在，移除错误提示
             if (questionContainer) {
@@ -330,14 +334,14 @@ const ProbabilityValidator = {
                 
                 const value = input.value.trim();
                 if (value) {
-                    const num = parseInt(value);
-                    if (isNaN(num)) {
-                    errors.push(`第${questionId}题（矩阵题）第${rowIndex + 1}行第${colIndex + 1}列的概率不是有效数字`);
-                    this.showInputError(input);
-                } else if (num < 0 || num > 100) {
-                    errors.push(`第${questionId}题（矩阵题）第${rowIndex + 1}行第${colIndex + 1}列的概率必须在0-100之间`);
-                    this.showInputError(input);
-                } else {
+                    const num = this.parseProbability(value);
+                    if (num === null) {
+                        errors.push(`第${questionId}题（矩阵题）第${rowIndex + 1}行第${colIndex + 1}列的概率不是有效数字`);
+                        this.showInputError(input);
+                    } else if (num < 0 || num > 100) {
+                        errors.push(`第${questionId}题（矩阵题）第${rowIndex + 1}行第${colIndex + 1}列的概率必须在0-100之间`);
+                        this.showInputError(input);
+                    } else {
                         probabilities.push(num);
                         validInputs.push(input);
                     }
@@ -416,8 +420,8 @@ const ProbabilityValidator = {
             
             const value = input.value.trim();
             if (value) {
-                const num = parseInt(value);
-                if (isNaN(num)) {
+                const num = this.parseProbability(value);
+                if (num === null) {
                     errors.push(`第${questionId}题（量表题）选项${index + 1}的概率不是有效数字`);
                     this.showInputError(input);
                 } else if (num < 0 || num > 100) {
@@ -522,8 +526,8 @@ const ProbabilityValidator = {
                 errors.push(`第${index + 1}个文本答案的概率不能为空`);
                 this.showInputError(probabilityInput);
             } else {
-                const num = parseInt(probabilityInput.value);
-                if (isNaN(num)) {
+                const num = this.parseProbability(probabilityInput.value);
+                if (num === null) {
                     errors.push(`第${index + 1}个文本答案的概率不是有效数字`);
                     this.showInputError(probabilityInput);
                 } else if (num < 0 || num > 100) {
@@ -674,8 +678,8 @@ const ProbabilityValidator = {
         // 验证当前输入值
         const value = input.value.trim();
         if (value) {
-            const num = parseInt(value);
-            if (isNaN(num)) {
+            const num = this.parseProbability(value);
+            if (num === null) {
                 this.showInputError(input, '');
             } else if (num < 0) {
                 this.showInputError(input, '');
@@ -761,18 +765,15 @@ const ProbabilityValidator = {
 
 // 将ProbabilityValidator对象暴露到全局作用域
 window.ProbabilityValidator = ProbabilityValidator;
-console.log('ProbabilityValidator对象已暴露到全局作用域');
 
 // 确保在页面完全加载后初始化验证功能
 function initializeValidation() {
-    console.log('initializeValidation函数被调用');
     // 不需要在这里调用addRealTimeValidation，因为此时题目还没有动态生成
     // 只需要在questionsLoaded事件触发时调用即可
 }
 
 // 为动态加载的题目添加验证
 window.addEventListener('questionsLoaded', function() {
-    console.log('questionsLoaded事件触发，调用addRealTimeValidation');
     ProbabilityValidator.addRealTimeValidation();
 });
 

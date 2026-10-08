@@ -28,11 +28,12 @@ def log(message):
 
 
 # ---------------------- 配置 ----------------------
-# 默认问卷星网址（当没有传入参数时使用）
-DEFAULT_WJX_URL = "https://v.wjx.cn/vm/Qu9AV5R.aspx"
+# 默认问卷星网址（当没有传入参数时使用）。
+# 不再内置作者本人的问卷链接：留空表示必须由调用方传入，或经环境变量 WJX_DEFAULT_URL 指定。
+DEFAULT_WJX_URL = os.environ.get("WJX_DEFAULT_URL", "")
 # Edge 驱动路径（可选）。可通过环境变量 WJX_EDGE_DRIVER 覆盖；
-# 该文件不存在时自动交给 Selenium Manager 解析，避免硬编码路径换机器后失效
-EDGE_DRIVER_PATH = os.environ.get("WJX_EDGE_DRIVER", r"D:\python\msedgedriver.exe")
+# 未配置时留空，直接交给 Selenium Manager 自动解析 —— 不把本机绝对路径写进源码。
+EDGE_DRIVER_PATH = os.environ.get("WJX_EDGE_DRIVER", "")
 
 
 # ----------------------------------------------------------
@@ -450,10 +451,14 @@ def _parse_one_question(q_div, question_index, code_explain, type_info_list):
 
 
 def main():
-    # 从命令行参数获取网址，如果没有参数则使用默认值
+    # 从命令行参数获取网址，如果没有参数则使用环境变量提供的默认值
     wjx_url = DEFAULT_WJX_URL
     if len(sys.argv) > 1:
         wjx_url = sys.argv[1]
+
+    if not wjx_url:
+        log("未提供问卷链接：请通过命令行参数传入，或设置环境变量 WJX_DEFAULT_URL")
+        sys.exit(1)
 
     # 1. 初始化浏览器（无头模式，不显示窗口）
     driver = init_browser()

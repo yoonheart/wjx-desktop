@@ -9,7 +9,6 @@ import json
 import sys
 import os
 
-import numpy
 import requests
 from selenium import webdriver
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -115,13 +114,21 @@ def check_stop_flag():
         return False
     return os.path.exists(stop_file)
 
-# 默认代理IP API链接（首页可自定义覆盖）
-DEFAULT_IP_API = "http://bapi.51daili.com/getapi2?linePoolIndex=-1&packid=2&time=11&qty=1&port=1&format=txt&dt=2&ct=1&dtc=2&regionCode=500100&rid=mso0aw2b1yn0b1x60z5s5&uid=72829&accessName=yoonheart&accessPassword=795C48CE03F0EF42D366F095D6F5340E&skey=autoaddwhiteip"
+# 代理 IP 提取链接：不再内置任何默认值。
+# 原实现把作者账号凭证（accessName / accessPassword / uid / rid）硬编码在这里，
+# 随源码或安装包公开会导致代理套餐被他人盗用，故改为一律由外部提供：
+#   优先级：配置 JSON 的 ip_api_url（界面填写） > 环境变量 WJX_IP_API
+# 两者都没有时不发请求，直接使用本机 IP。
+DEFAULT_IP_API = os.environ.get("WJX_IP_API", "")
 
 
 def zanip():
     """优化版：加重试+错误处理，确保拿到有效IP"""
-    api = config.get("ip_api_url", DEFAULT_IP_API)
+    # 界面填写的链接优先，其次环境变量；两者都没有时不发请求，直接使用本机 IP
+    api = config.get("ip_api_url") or DEFAULT_IP_API
+    if not api:
+        print("未配置代理IP提取链接，使用本机IP")
+        return None
     max_retry = 3  # 最多重试3次
     retry_count = 0
 
@@ -192,7 +199,7 @@ def vacant(driver: WebDriver, current):
         if len(norm_p) != len(content):
             norm_p = [1 / len(content)] * len(content)
 
-        text_index = numpy.random.choice(a=range(len(content)), p=norm_p)
+        text_index = random.choices(range(len(content)), weights=norm_p, k=1)[0]
         selected_text = content[text_index]
 
         input_elem = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
@@ -218,7 +225,7 @@ def single(driver: WebDriver, current):
             norm_p = normalize_prob(p)
             if len(norm_p) != len(options):
                 raise ValueError(f"第{current}题参数长度({len(p)})与选项数({len(options)})不匹配！")
-            r = numpy.random.choice(a=range(1, len(options) + 1), p=norm_p)
+            r = random.choices(range(1, len(options) + 1), weights=norm_p, k=1)[0]
 
         # 点击选中选项
         option_element = driver.find_element(By.CSS_SELECTOR,
@@ -246,16 +253,20 @@ def single(driver: WebDriver, current):
                         continue
 
                 if other_input:
-                    # 获取当前题目的"其他"选项文本和概率
-                    other_text_list = config.get("single_other_texts", {}).get(str(current), ["其他情况"])
-                    other_text_prob = config.get("single_other_texts_prob", {}).get(str(current), None)
+                    # 优先取「题号_选项序号」的配置，取不到再回退到只按题号存的旧格式。
+                    # r 是 1-based 的第几个选项，前端按 0-based 序号存储，所以减 1。
+                    single_other_texts = config.get("single_other_texts", {})
+                    single_other_texts_prob = config.get("single_other_texts_prob", {})
+                    option_key = f"{current}_{r - 1}"
+                    other_text_list = single_other_texts.get(option_key) or single_other_texts.get(str(current), ["其他情况"])
+                    other_text_prob = single_other_texts_prob.get(option_key) or single_other_texts_prob.get(str(current))
 
                     # 根据概率选择文本
                     if other_text_prob and len(other_text_prob) == len(other_text_list):
                         # 概率归一化
                         norm_prob = normalize_prob(other_text_prob)
-                        # 使用numpy根据概率选择
-                        text_index = numpy.random.choice(range(len(other_text_list)), p=norm_prob)
+                        # 按概率选择文本（标准库按权重抽样，等价于原先的 numpy.random.choice）
+                        text_index = random.choices(range(len(other_text_list)), weights=norm_prob, k=1)[0]
                         other_text = other_text_list[text_index]
                     else:
                         # 无概率配置时，均等随机选择
@@ -285,7 +296,7 @@ def droplist(driver: WebDriver, current):
         p = config.get("droplist_prob", {}).get(str(current), [1] * (len(options) - 1))
         norm_p = normalize_prob(p[:len(options) - 1])  # 只取前len(options)-1个（排除"请选择"）
 
-        r = numpy.random.choice(a=range(1, len(options)), p=norm_p)
+        r = random.choices(range(1, len(options)), weights=norm_p, k=1)[0]
         driver.find_element(By.XPATH, f"//*[@id='select2-q{current}-results']/li[{r + 1}]").click()
     except Exception as e:
         print(f"处理下拉框题{current}失败: {e}")
@@ -308,7 +319,8 @@ def multiple(driver: WebDriver, current):
         max_attempts = 100  # 防止无限循环
         attempts = 0
         while sum(mul_list) <= 0 and attempts < max_attempts:
-            mul_list = [numpy.random.choice(a=[0, 1], p=[1 - (item / 100), item / 100]) for item in p]
+            # 每个选项按自身概率独立判定是否勾选（等价于原先的 numpy 伯努利抽样）
+            mul_list = [1 if random.random() < (item / 100) else 0 for item in p]
             attempts += 1
 
         # 至少选一个（兜底）
@@ -342,16 +354,19 @@ def multiple(driver: WebDriver, current):
                                 continue
 
                         if other_input:
-                            # 获取当前题目的"其他"选项文本和概率
-                            other_text_list = config.get("other_texts", {}).get(str(current), ["其他情况"])
-                            other_text_prob = config.get("other_texts_prob", {}).get(str(current), None)
+                            # 同上：优先按「题号_选项序号」取，取不到回退到纯题号
+                            other_texts = config.get("other_texts", {})
+                            other_texts_prob = config.get("other_texts_prob", {})
+                            option_key = f"{current}_{idx}"
+                            other_text_list = other_texts.get(option_key) or other_texts.get(str(current), ["其他情况"])
+                            other_text_prob = other_texts_prob.get(option_key) or other_texts_prob.get(str(current))
 
                             # 根据概率选择文本
                             if other_text_prob and len(other_text_prob) == len(other_text_list):
                                 # 概率归一化
                                 norm_prob = normalize_prob(other_text_prob)
-                                # 使用numpy根据概率选择
-                                text_index = numpy.random.choice(range(len(other_text_list)), p=norm_prob)
+                                # 按概率选择文本（标准库按权重抽样，等价于原先的 numpy.random.choice）
+                                text_index = random.choices(range(len(other_text_list)), weights=norm_prob, k=1)[0]
                                 other_text = other_text_list[text_index]
                             else:
                                 # 无概率配置时，均等随机选择
@@ -398,7 +413,7 @@ def matrix(driver: WebDriver, current):
                 if len(p) == actual_options:
                     # 概率长度匹配时正常使用
                     norm_p = normalize_prob(p)
-                    opt = numpy.random.choice(a=range(2, len(cols) + 1), p=norm_p)
+                    opt = random.choices(range(2, len(cols) + 1), weights=norm_p, k=1)[0]
                 else:
                     # 概率长度不匹配时，优先使用配置的第一个选项
                     print(f"  概率长度不匹配，使用第一个选项")
@@ -438,7 +453,7 @@ def scale(driver: WebDriver, current):
             norm_p = normalize_prob(p)
             if len(norm_p) != len(options):
                 raise ValueError(f"第{current}题参数长度({len(p)})与选项数({len(options)})不匹配！")
-            b = numpy.random.choice(a=range(1, len(options) + 1), p=norm_p)
+            b = random.choices(range(1, len(options) + 1), weights=norm_p, k=1)[0]
 
         driver.find_element(By.CSS_SELECTOR, f"#div{current} > div.scale-div > div > ul > li:nth-child({b})").click()
     except Exception as e:
@@ -631,26 +646,31 @@ def run():
         else:
             print(f"⚠️ 线程 {threading.current_thread().name} 未使用代理IP，使用本机IP")
 
-        # 初始化Edge驱动 + 超时配置（防止卡死）
-        driver = webdriver.Edge(options=temp_option)
-        driver.set_window_size(550, 650)
-        driver.set_page_load_timeout(15)  # 页面加载超时15秒
-        driver.set_script_timeout(10)     # 脚本执行超时10秒
-
-        # 关键：隐藏navigator.webdriver（核心反检测）
-        driver.execute_cdp_cmd(
-            "Page.addScriptToEvaluateOnNewDocument",
-            {"source": """
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh']});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
-                Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
-            """}
-        )
+        # 驱动初始化必须放进 try：初始化失败（驱动版本不匹配、浏览器缺失）若抛到外面，
+        # 整个线程会静默退出，脚本最终仍以退出码 0 结束，Java 端就会把「一份都没成功」
+        # 误判成任务正常完成。放进 try 后走统一的失败分支，至少能被正确计数。
+        driver = None
 
         # ========== 刷题逻辑（补全超时+失败处理） ==========
         try:
+            # 初始化Edge驱动 + 超时配置（防止卡死）
+            driver = webdriver.Edge(options=temp_option)
+            driver.set_window_size(550, 650)
+            driver.set_page_load_timeout(15)  # 页面加载超时15秒
+            driver.set_script_timeout(10)     # 脚本执行超时10秒
+
+            # 关键：隐藏navigator.webdriver（核心反检测）
+            driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": """
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh']});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
+                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                """}
+            )
+
             # 记录本份问卷开始填写时间（线程独立，时间控制模式在提交前按此补足时长）
             thread_local_data.fill_start_time = time.time()
 
@@ -708,11 +728,12 @@ def run():
                 # 保证浏览器驱动能被正常释放
                 force_stop.set()
         finally:
-            # 无论成功/失败，都确保关闭浏览器
-            try:
-                driver.quit()
-            except:
-                pass
+            # 无论成功/失败，都确保关闭浏览器（初始化失败时 driver 还是 None）
+            if driver is not None:
+                try:
+                    driver.quit()
+                except:
+                    pass
         continue
 
 
@@ -742,91 +763,6 @@ if __name__ == "__main__":
         # 解析JSON配置
         config = json.loads(config_json)
 
-        # 处理前端传递的配置结构
-        # 检查是否有"传过来的所有问题答案"字段
-        if "传过来的所有问题答案" in config:
-            questions = config["传过来的所有问题答案"]
-
-            # 初始化配置字典
-            texts = {}
-            texts_prob = {}
-            other_texts = {}
-            other_texts_prob = {}
-            single_other_texts = {}
-            single_other_texts_prob = {}
-
-            # 遍历所有问题
-            for question in questions:
-                qid = question["id"]
-                qtype = question["type"]
-
-                # 处理填空题
-                if qtype == "填空题":
-                    # 检查是否有textAnswers字段
-                    if "textAnswers" in question:
-                        text_list = []
-                        prob_list = []
-                        for answer in question["textAnswers"]:
-                            if "text" in answer:
-                                text_list.append(answer["text"])
-                                prob_list.append(answer.get("probability", 100))
-                        if text_list:
-                            texts[qid] = text_list
-                            texts_prob[qid] = prob_list
-                    # 检查是否有options字段
-                    elif "options" in question:
-                        text_list = []
-                        prob_list = []
-                        for option in question["options"]:
-                            if "text" in option:
-                                text_list.append(option["text"])
-                                prob_list.append(option.get("probability", 100))
-                        if text_list:
-                            texts[qid] = text_list
-                            texts_prob[qid] = prob_list
-
-                # 处理多选题的其他选项文本
-                elif qtype == "多选题":
-                    if "optionTextAnswers" in question:
-                        for option_index, text_answers in question["optionTextAnswers"].items():
-                            text_list = []
-                            prob_list = []
-                            for answer in text_answers:
-                                if "text" in answer:
-                                    text_list.append(answer["text"])
-                                    prob_list.append(answer.get("probability", 100))
-                            if text_list:
-                                other_texts[qid] = text_list
-                                other_texts_prob[qid] = prob_list
-
-                # 处理单选题的其他选项文本
-                elif qtype == "单选题":
-                    if "optionTextAnswers" in question:
-                        for option_index, text_answers in question["optionTextAnswers"].items():
-                            text_list = []
-                            prob_list = []
-                            for answer in text_answers:
-                                if "text" in answer:
-                                    text_list.append(answer["text"])
-                                    prob_list.append(answer.get("probability", 100))
-                            if text_list:
-                                single_other_texts[qid] = text_list
-                                single_other_texts_prob[qid] = prob_list
-
-            # 更新配置对象
-            if texts:
-                config["texts"] = texts
-            if texts_prob:
-                config["texts_prob"] = texts_prob
-            if other_texts:
-                config["other_texts"] = other_texts
-            if other_texts_prob:
-                config["other_texts_prob"] = other_texts_prob
-            if single_other_texts:
-                config["single_other_texts"] = single_other_texts
-            if single_other_texts_prob:
-                config["single_other_texts_prob"] = single_other_texts_prob
-
         # 初始化全局变量
         target_num = config.get("target_num", 3)
         fail_threshold = config.get("fail_threshold", target_num / 4 + 1)
@@ -849,6 +785,14 @@ if __name__ == "__main__":
 
         # 所有线程已结束，强制写一次最终进度，确保 Java 端读到完整结果
         update_progress(force=True)
+
+        # 一份都没成功、又不是用户主动停止时，以非 0 退出码结束，
+        # 让 Java 端把任务标记为 FAILED，而不是给用户一个空的「运行结束」页面。
+        stop_file = config.get("stop_file", "stop.flag")
+        stopped_by_user = bool(stop_file) and os.path.exists(stop_file)
+        if counter_completed.get() == 0 and not stopped_by_user:
+            print("本次任务没有成功提交任何一份问卷（退出码 2）", file=sys.stderr)
+            sys.exit(2)
             
     except json.JSONDecodeError as e:
         print(f"JSON解析失败: {e}")

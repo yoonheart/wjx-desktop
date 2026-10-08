@@ -1,0 +1,20 @@
+# 问卷星自动刷题工具 —— Python 侧依赖
+#
+# 安装：pip install -r requirements.txt
+# 说明：Java 端（Spring Boot）只负责 Web 壳与任务调度，
+#       真正的浏览器操作全部由 src/main/resources/scripts/ 下的两个脚本完成。
+#       scan.py  —— 解析问卷结构（需要 selenium + bs4 + lxml）
+#       wjx2.py  —— 实际填写提交（需要 selenium + requests）
+
+# 浏览器自动化。4.6 起内置 Selenium Manager，可以自动匹配并下载 Edge 驱动
+selenium>=4.6
+
+# HTML 解析：BeautifulSoup + lxml 解析器（scan.py 用 BeautifulSoup(html, "lxml")）
+beautifulsoup4>=4.11
+lxml>=4.9
+
+# 调用代理 IP 接口（wjx2.py 的 zanip）
+requests>=2.28
+
+# 注：原先的 numpy 依赖已移除。按概率选择选项改用标准库 random.choices，
+#     行为与 numpy.random.choice(p=...) 等价，可省去约 30MB 的运行时体积。

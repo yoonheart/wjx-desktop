@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>问卷解析结果</title>
-    <link rel="icon" href="https://java------------ai.oss-cn-beijing.aliyuncs.com/2025/12/1.jpg" type="image/jpg">
+    <link rel="icon" href="/static/pictures/头像.jpg" type="image/jpeg">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <link href="/static/css/app.css" rel="stylesheet">
@@ -18,7 +18,7 @@
             <i class="fa fa-arrow-left" aria-hidden="true"></i> 返回首页
         </button>
         <span class="appbar-title">问卷解析结果</span>
-        <span class="appbar-meta">Workbench</span>
+        <span class="appbar-meta">Yoonheart</span>
     </header>
 
     <main class="wrap stack">
@@ -184,10 +184,12 @@
                 <label class="form-check-label" for="proxySwitch">ip代理</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               title="开启后使用代理IP刷题，每个IP填写多份问卷"></i>
+               title="若要刷问卷这个功能必须开启！！！这个功能用大白话讲就是每台电脑最多可以刷12份问卷，
+               开启以后，就会有无穷多台电脑给你填问卷，因为需要一定成本，所以这里仅提供大约40个ip试用，
+               如果想要刷更多的问卷，需要自己上其他提供ip代理的网站获取链接！！！"></i>
             <span id="apiUrlGroup" class="grow">
-                <input type="text" id="apiUrl" class="form-control api-input" placeholder="http://..."
-                       value="http://bapi.51daili.com/getapi2?linePoolIndex=-1&packid=2&time=11&qty=1&port=1&format=txt&dt=2&ct=1&dtc=2&regionCode=500100&rid=mso0aw2b1yn0b1x60z5s5&uid=72829&accessName=yoonheart&accessPassword=795C48CE03F0EF42D366F095D6F5340E&skey=autoaddwhiteip">
+                <input type="text" id="apiUrl" class="form-control api-input"
+                       placeholder="粘贴你自己的代理IP提取链接（留空则使用本机IP）">
             </span>
         </div>
 
@@ -198,17 +200,17 @@
                 <label class="form-check-label" for="guiMode">界面模式</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               title="开启后弹出浏览器窗口，可实时观看填写过程；默认关闭，浏览器在后台静默运行"></i>
+               title="开启后弹出浏览器窗口，可实时观看填写过程，查看是否会出什么问题；默认关闭，浏览器在后台静默运行"></i>
         </div>
 
         <!-- 时间控制 -->
         <div class="setting-row">
             <div class="form-check form-switch">
                 <input type="checkbox" id="timeControlSwitch" class="form-check-input">
-                <label class="form-check-label" for="timeControlSwitch">时间控制</label>
+                <label class="form-check-label" for="timeControlSwitch">单份问卷时间控制</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               title="开启后每份问卷耗时在设定区间内随机，且一个IP只填一份"></i>
+               title="开启后每份问卷填写时间在设定区间内随机，且一个IP只填一份"></i>
             <span id="timeControlGroup" class="grow is-hidden">
                 <span class="field-inline">
                     <input type="number" id="minFillTime" class="form-control time-input"
@@ -236,6 +238,19 @@
             <button type="button" class="btn btn-primary" id="confirmOk">确认</button>
         </div>
     </div>
+</div>
+
+<!-- 右下角赞助组件：默认只露一个圆形头像，鼠标悬停（或点击）后向上展开 -->
+<div id="donate" class="donate is-hidden">
+    <div class="donate-card">
+        <button type="button" class="donate-close" id="donateClose" aria-label="关闭">&times;</button>
+        <div class="donate-title">自愿赞助</div>
+        <p class="donate-desc">如果这个工具帮到了你，欢迎请我喝杯奶茶～纯自愿，本工具永远免费。</p>
+        <img class="donate-qr" src="/static/pictures/a.png" alt="微信收款码">
+    </div>
+    <button type="button" class="donate-fab" id="donateFab" aria-label="支持作者" aria-expanded="false">
+        <img src="/static/pictures/头像.jpg" alt="">
+    </button>
 </div>
 
 <script src="/static/js/request.js"></script>

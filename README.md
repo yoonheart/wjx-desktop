@@ -54,13 +54,13 @@ src/main/resources/
 - **Python 3.x** 并安装依赖：
 
 ```bash
-pip install selenium beautifulsoup4 numpy requests
+pip install selenium beautifulsoup4 lxml requests
 ```
 
 - **Microsoft Edge 浏览器**
 
-> Edge WebDriver 为**可选**：默认尝试 `D:\python\msedgedriver.exe`，
-> 该文件不存在时自动交给 Selenium Manager 解析（可用环境变量 `WJX_EDGE_DRIVER` 覆盖路径）。
+> Edge WebDriver 为**可选**：可通过环境变量 `WJX_EDGE_DRIVER` 指定驱动路径；
+> 未指定时直接交给 Selenium Manager 自动匹配版本（需联网）。源码中不内置任何本机路径。
 >
 > Python 解释器默认依次探测 `python` / `py` / `python3`，
 > 也可通过环境变量 `WJX_PYTHON` 或启动参数 `-Dwjx.python=<路径>` 显式指定。
@@ -69,13 +69,15 @@ pip install selenium beautifulsoup4 numpy requests
 
 1. 打开首页，粘贴问卷星链接，点击「开始解析」
 2. 在解析结果页为每道题的每个选项配置概率（或使用「一键随机概率」）
-3. （可选）点击「功能详细设置」调整无界面模式、代理、时间控制
+3. （可选）点击「功能详细设置」调整 ip代理、界面模式、时间控制
 4. 点击「准备就绪！开刷」，页面切换为进度面板
 
 ## 代理 IP 配置
 
-代理 IP 提取链接可在**「功能详细设置 → 代理」**输入框中填写；
-未填写时使用 `wjx2.py` 中 `DEFAULT_IP_API` 的内置链接。
+代理 IP 提取链接可在**「功能详细设置 → ip代理」**输入框中填写，
+也可通过环境变量 `WJX_IP_API` 提供；**两者都没有时脚本不会请求代理，直接使用本机 IP**。
+
+> 出于安全考虑，源码与发行包中**不再内置任何代理账号凭证**，请自行到代理服务商处申请提取链接。
 
 > 脚本按**三分钟短效 IP**设计，链接需自行申请。开启「时间控制」后一个 IP 仅填写一份。
 
@@ -87,7 +89,7 @@ git clone https://github.com/YoonHeart/wjx-springboot.git
 cd wjx-springboot
 
 # 2. 安装 Python 依赖
-pip install selenium beautifulsoup4 numpy requests
+pip install -r requirements.txt
 
 # 3. 配置 Python 解释器与代理 IP 提取链接（可选）
 

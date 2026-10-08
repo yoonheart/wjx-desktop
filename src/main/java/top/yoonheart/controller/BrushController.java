@@ -36,6 +36,14 @@ public class BrushController {
     private static final int MAX_TARGET_COUNT = 1000;
     /** 当前仅支持 2 个窗口 */
     private static final int SUPPORTED_THREADS = 2;
+    /**
+     * 任务序号，用于保证 taskId 唯一。
+     *
+     * <p>taskId 会直接拼进进度文件与停止文件的路径，只靠毫秒时间戳的话，
+     * 同一毫秒内启动两个任务会拿到同名文件，两条任务会互相覆盖进度。</p>
+     */
+    private static final java.util.concurrent.atomic.AtomicLong TASK_SEQ =
+            new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * 创建刷问卷异步任务。
@@ -69,7 +77,7 @@ public class BrushController {
                 return Result.error("窗口数必须为2，请重新设置");
             }
 
-            String taskId = "task_" + System.currentTimeMillis();
+            String taskId = "task_" + System.currentTimeMillis() + "_" + TASK_SEQ.incrementAndGet();
 
             Map<String, Object> config = new LinkedHashMap<>();
             config.put("url", url);
@@ -162,7 +170,6 @@ public class BrushController {
         Map<String, Object> multipleProb = new LinkedHashMap<>();
         Map<String, Object> otherTexts = new LinkedHashMap<>();
         Map<String, Object> otherTextsProb = new LinkedHashMap<>();
-        Map<String, Object> droplistProb = new LinkedHashMap<>();
         Map<String, Object> texts = new LinkedHashMap<>();
         Map<String, Object> textsProb = new LinkedHashMap<>();
         Map<String, Object> scaleProb = new LinkedHashMap<>();
@@ -213,7 +220,6 @@ public class BrushController {
         config.put("multiple_prob", multipleProb);
         config.put("other_texts", otherTexts);
         config.put("other_texts_prob", otherTextsProb);
-        config.put("droplist_prob", droplistProb);
         config.put("texts", texts);
         config.put("texts_prob", textsProb);
         config.put("scale_prob", scaleProb);
@@ -228,7 +234,8 @@ public class BrushController {
         List<Integer> probs = new ArrayList<>();
         for (Object option : optionList) {
             if (option instanceof Map<?, ?> optionMap) {
-                probs.add((Integer) optionMap.get("probability"));
+                Integer probability = toInt(optionMap.get("probability"));
+                probs.add(probability != null ? probability : 0);
             }
         }
         if (!probs.isEmpty()) {
@@ -252,12 +259,17 @@ public class BrushController {
             for (Object answer : answerList) {
                 if (answer instanceof Map<?, ?> entry) {
                     textList.add((String) entry.get("text"));
-                    probList.add((Integer) entry.get("probability"));
+                    Integer probability = toInt(entry.get("probability"));
+                    probList.add(probability != null ? probability : 0);
                 }
             }
             if (!textList.isEmpty()) {
-                texts.put(qid, textList);
-                probs.put(qid, probList);
+                // 键用「题号_选项序号」：一道题可能有多个「其他」选项，
+                // 若只按题号做键，后面的选项会把前面的答案覆盖掉。
+                // Python 侧按实际点中的选项序号取值，取不到再回退到纯题号。
+                String key = qid + "_" + optionIndex;
+                texts.put(key, textList);
+                probs.put(key, probList);
             }
         }
     }
@@ -299,7 +311,8 @@ public class BrushController {
             List<Integer> rowProbs = new ArrayList<>();
             for (Object option : optionList) {
                 if (option instanceof Map<?, ?> optionMap) {
-                    rowProbs.add((Integer) optionMap.get("probability"));
+                    Integer probability = toInt(optionMap.get("probability"));
+                    rowProbs.add(probability != null ? probability : 0);
                 }
             }
             matrixRows.add(rowProbs);

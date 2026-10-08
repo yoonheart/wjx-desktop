@@ -38,3 +38,21 @@ build/
 ### Python ###
 __pycache__/
 *.py[cod]
+
+### 打包与分发相关（只上传源码，以下一律不进 GitHub）###
+# jpackage / 安装程序产物
+/release/
+/dist/
+/packaging/
+/build-tools/
+*.msi
+*.wixpdb
+*.iss
+
+# 随包组装的运行时（打包时现下现装，不下发源码仓库）
+/python-runtime/
+/jre/
+/runtime/
+
+# JCEF native 库首次运行解压出的缓存
+/jcef_cache/

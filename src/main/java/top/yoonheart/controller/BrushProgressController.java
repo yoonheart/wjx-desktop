@@ -2,6 +2,7 @@ package top.yoonheart.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,12 +19,21 @@ public class BrushProgressController {
     @Autowired
     private BrushTaskManager taskManager;
 
-    /** 订阅任务进度（SSE 长连接，无超时限制） */
+    /**
+     * 订阅任务进度（SSE 长连接）。
+     *
+     * <p>任务不存在时返回 404，而不是先建立连接再说。EventSource 遇到 404 或非
+     * {@code text/event-stream} 响应会直接「fail the connection」——置为 CLOSED
+     * 且不会自动重连，正好避免为无效 taskId 挂上一条永不超时的服务端连接。</p>
+     */
     @GetMapping(value = "/progress/{taskId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter getProgress(@PathVariable String taskId) {
+    public ResponseEntity<SseEmitter> getProgress(@PathVariable String taskId) {
+        if (!taskManager.hasTask(taskId)) {
+            return ResponseEntity.notFound().build();
+        }
         SseEmitter emitter = new SseEmitter(0L);
         taskManager.registerEmitter(taskId, emitter);
-        return emitter;
+        return ResponseEntity.ok(emitter);
     }
 
     /** 停止任务：写入停止标志文件，由 Python 脚本优雅退出 */

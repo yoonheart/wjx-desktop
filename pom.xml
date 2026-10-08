@@ -13,19 +13,6 @@
     <version>0.0.1-SNAPSHOT</version>
     <name>wjx-springboot</name>
     <description>wjx-springboot</description>
-    <url/>
-    <licenses>
-        <license/>
-    </licenses>
-    <developers>
-        <developer/>
-    </developers>
-    <scm>
-        <connection/>
-        <developerConnection/>
-        <tag/>
-        <url/>
-    </scm>
     <properties>
         <java.version>17</java.version>
     </properties>
@@ -56,6 +43,13 @@
             <resource>
                 <directory>src/main/resources</directory>
                 <filtering>false</filtering>
+                <!-- .gitignore 管不住 Maven：不加 excludes 的话，本地跑过脚本后
+                     产生的 __pycache__/*.pyc 会被一起打进 jar -->
+                <excludes>
+                    <exclude>**/__pycache__/**</exclude>
+                    <exclude>**/*.pyc</exclude>
+                    <exclude>**/*.pyo</exclude>
+                </excludes>
             </resource>
         </resources>
         <plugins>
