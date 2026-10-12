@@ -22,11 +22,22 @@
 
             <form class="hero-form reveal reveal-2" onsubmit="return false;">
                 <div class="url-row">
-                    <input type="url" id="wjxUrl" class="form-control"
-                           placeholder="点击开始"
-                           data-placeholder-idle="点击开始"
-                           data-placeholder-active="请输入问卷链接 例：https://v.wjx.cn/vm/xxxxxx.aspx"
-                           autocomplete="off" spellcheck="false" required>
+                    <div class="url-field">
+                        <input type="url" id="wjxUrl" class="form-control"
+                               placeholder="点击开始"
+                               data-placeholder-idle="点击开始"
+                               data-placeholder-active="请输入问卷链接 例：https://v.wjx.cn/vm/xxxxxx.aspx"
+                               autocomplete="off" spellcheck="false" required>
+                        <button type="button" class="url-clear is-hidden" id="urlClear"
+                                aria-label="清空输入" title="清空">&times;</button>
+                        <div class="url-history is-hidden" id="urlHistory">
+                            <div class="url-history-head">
+                                <span class="url-history-title">历史记录</span>
+                                <button type="button" class="url-history-clear" id="urlHistoryClear">清空</button>
+                            </div>
+                            <ul class="url-history-list" id="urlHistoryList"></ul>
+                        </div>
+                    </div>
                     <button type="button" class="btn btn-primary" id="analyzeBtn">
                         开始解析
                     </button>
@@ -73,6 +84,21 @@
 
         </div>
     </main>
+</div>
+
+<!-- 通用确认对话框（软件自带样式，替代浏览器原生 confirm） -->
+<div id="confirmModal" class="modal">
+    <div class="modal-content modal-content--confirm">
+        <div class="modal-title" id="confirmTitle">确认操作</div>
+        <div class="modal-body">
+            <dl class="confirm-list" id="confirmList"></dl>
+            <p class="confirm-note" id="confirmMessage"></p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn" id="confirmCancel">取消</button>
+            <button type="button" class="btn btn-primary" id="confirmOk">确认</button>
+        </div>
+    </div>
 </div>
 
 <script src="/static/js/alert.js"></script>
@@ -249,5 +275,9 @@
     // 离开页面时也顺手停掉轮询，双保险
     window.addEventListener('pagehide', stopDriverPolling);
 </script>
+<!-- 软件自带确认框（含桌面端关窗钩子）+ 网址历史记录下拉：
+     放在页面脚本之后加载，确认框实现会覆盖 analysis.js 内的旧版 -->
+<script src="/static/js/confirm.js"></script>
+<script src="/static/js/url-history.js"></script>
 </body>
 </html>

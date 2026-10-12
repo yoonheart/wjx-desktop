@@ -584,76 +584,6 @@ function saveSettings() {
     }
 });
 
-/**
- * 自定义确认对话框，替代阻塞式 window.confirm。
- * @param {Object}   opts
- * @param {string}  [opts.title]   标题
- * @param {Array}   [opts.rows]    参数摘要 [[标签, 值], ...]
- * @param {string}  [opts.message] 提示正文
- * @param {string}  [opts.okText]  确认按钮文案
- * @param {boolean} [opts.danger]  确认按钮是否用危险样式
- * @returns {Promise<boolean>} 用户是否点击了确认
- */
-function askConfirm(opts) {
-    opts = opts || {};
-
-    const modal = document.getElementById('confirmModal');
-    const titleEl = document.getElementById('confirmTitle');
-    const listEl = document.getElementById('confirmList');
-    const msgEl = document.getElementById('confirmMessage');
-    const okBtn = document.getElementById('confirmOk');
-    const cancelBtn = document.getElementById('confirmCancel');
-
-    // 兜底：对话框节点缺失时退回原生 confirm
-    if (!modal || !okBtn || !cancelBtn) {
-        return Promise.resolve(window.confirm(opts.message || opts.title || '确认继续？'));
-    }
-
-    titleEl.textContent = opts.title || '确认操作';
-
-    listEl.innerHTML = '';
-    const rows = opts.rows || [];
-    rows.forEach(function (row) {
-        const dt = document.createElement('dt');
-        dt.textContent = row[0];
-        const dd = document.createElement('dd');
-        dd.textContent = row[1];
-        listEl.appendChild(dt);
-        listEl.appendChild(dd);
-    });
-    listEl.classList.toggle('is-hidden', rows.length === 0);
-
-    msgEl.textContent = opts.message || '';
-    msgEl.classList.toggle('is-hidden', !opts.message);
-
-    okBtn.textContent = opts.okText || '确认';
-    okBtn.className = 'btn ' + (opts.danger ? 'btn-danger' : 'btn-primary');
-
-    modal.classList.add('is-open');
-
-    return new Promise(function (resolve) {
-        function finish(result) {
-            modal.classList.remove('is-open');
-            modal.onclick = null;
-            okBtn.removeEventListener('click', onOk);
-            cancelBtn.removeEventListener('click', onCancel);
-            document.removeEventListener('keydown', onKey);
-            resolve(result);
-        }
-        function onOk() { finish(true); }
-        function onCancel() { finish(false); }
-        function onKey(e) { if (e.key === 'Escape') finish(false); }
-
-        okBtn.addEventListener('click', onOk);
-        cancelBtn.addEventListener('click', onCancel);
-        document.addEventListener('keydown', onKey);
-        // 点击遮罩也视为取消
-        modal.onclick = function (e) { if (e.target === modal) finish(false); };
-
-        okBtn.focus();
-    });
-}
-
 // 确认返回首页的函数
 function confirmBack() {
     askConfirm({
@@ -1844,9 +1774,19 @@ function generateWithMinProb(count, minProb, remaining) {
 // 均衡分布的随机概率生成（用于多选题）
 function generateBalancedDistribution(count) {
     if (count === 1) return [100];
+
+    // 选项数过多（> 100）时无法保证每项都至少 1%：把 100 个点随机撒到各选项上
+    if (count > 100) {
+        const probs = new Array(count).fill(0);
+        for (let k = 0; k < 100; k++) {
+            probs[Math.floor(Math.random() * count)]++;
+        }
+        return probs;
+    }
     
     // 多选题：允许一定差异，但避免极端，提高信效度
-    const minProb = 12; // 每个选项至少12%的概率
+    // 每个选项的最小概率：默认 12%，选项过多时自动下调，保证 minProb * count <= 100
+    const minProb = Math.max(1, Math.min(12, Math.floor(100 / count)));
     const maxProb = 60; // 每个选项最多60%的概率
     const probs = [];
     let remaining = 100 - minProb * count;
@@ -1879,6 +1819,20 @@ function generateBalancedDistribution(count) {
                 probs[i] += add;
                 excess -= add;
             }
+        }
+    }
+
+    // 兜底：确保总和恰好为 100（选项数很多时上面的分配仍可能有偏差）
+    let diff = 100 - probs.reduce((a, b) => a + b, 0);
+    let guard = 0;
+    while (diff !== 0 && guard++ < 10000) {
+        const idx = Math.floor(Math.random() * count);
+        if (diff > 0) {
+            probs[idx]++;
+            diff--;
+        } else if (probs[idx] > 1) {
+            probs[idx]--;
+            diff++;
         }
     }
     

@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * Python 脚本执行器。
@@ -180,7 +181,24 @@ public final class PythonExecutor {
      * @return 脚本的标准输出
      */
     public static String executePythonScript(String scriptPath, String... args) {
-        return executePythonScript(TIMEOUT_SECONDS, scriptPath, args);
+        return executePythonScript(TIMEOUT_SECONDS, scriptPath, null, args);
+    }
+
+    /**
+     * 执行 Python 脚本并返回标准输出，同时把进程句柄回调给调用方。
+     *
+     * <p>用于让任务管理器持有正在运行的 Python 进程，从而支持「强杀」——
+     * 停止任务时若脚本卡死（写停止标志文件也无效），直接结束整棵进程树，
+     * 顺带关掉它拉起的浏览器。</p>
+     *
+     * @param scriptPath      脚本绝对路径
+     * @param processConsumer 进程启动后的回调（可为 null）
+     * @param args            脚本参数
+     * @return 脚本的标准输出
+     */
+    public static String executePythonScript(String scriptPath, Consumer<Process> processConsumer,
+                                             String... args) {
+        return executePythonScript(TIMEOUT_SECONDS, scriptPath, processConsumer, args);
     }
 
     /**
@@ -189,12 +207,20 @@ public final class PythonExecutor {
      * <p>当首个参数是 JSON（以 <code>{</code> 开头）时，会先写入临时文件再传递路径，
      * 以规避 Windows 命令行长度限制；其余情况直接作为命令行参数传入。</p>
      *
-     * @param timeoutSeconds 超时秒数，超时后进程树会被强制结束
-     * @param scriptPath     脚本绝对路径
-     * @param args           脚本参数
+     * @param timeoutSeconds  超时秒数，超时后进程树会被强制结束
+     * @param scriptPath      脚本绝对路径
+     * @param processConsumer 进程启动后的回调（可为 null），用于外部持有进程以支持强杀
+     * @param args            脚本参数
      * @return 脚本的标准输出
      */
+    /** 执行 Python 脚本并返回标准输出，可指定超时（不关心进程句柄） */
     public static String executePythonScript(long timeoutSeconds, String scriptPath, String... args) {
+        return executePythonScript(timeoutSeconds, scriptPath, null, args);
+    }
+
+    /** 执行 Python 脚本并返回标准输出（可指定超时并把进程句柄回调给调用方） */
+    public static String executePythonScript(long timeoutSeconds, String scriptPath,
+                                             Consumer<Process> processConsumer, String... args) {
         File tempConfigFile = null;
         try {
             List<String> command = new ArrayList<>();
@@ -224,6 +250,15 @@ public final class PythonExecutor {
 
             Process process = processBuilder.start();
 
+            // 把进程句柄交给调用方（任务管理器），以便在停止/卡死时强杀整棵进程树
+            if (processConsumer != null) {
+                try {
+                    processConsumer.accept(process);
+                } catch (Exception e) {
+                    log.warn("进程回调执行失败，忽略", e);
+                }
+            }
+
             StringBuilder output = new StringBuilder();
             StringBuilder errorOutput = new StringBuilder();
 
@@ -231,7 +266,7 @@ public final class PythonExecutor {
             Thread errorThread = drainAsync(process.getErrorStream(), errorOutput);
 
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                destroyProcess(process);
+                destroyProcessTree(process);
                 throw new IllegalStateException("Python脚本执行超时（超过 " + timeoutSeconds + " 秒）");
             }
 
@@ -304,16 +339,62 @@ public final class PythonExecutor {
         return thread;
     }
 
-    /** 分阶段销毁进程：先优雅终止，超时后强制结束整棵进程树 */
-    private static void destroyProcess(Process process) {
-        process.destroy();
+    /**
+     * 结束整棵进程树（Python 本体 + msedgedriver + 浏览器）。
+     *
+     * <p>跨平台实现：先记下所有子孙进程句柄（一旦父进程先退出，句柄就取不到了，
+     * 所以必须在 destroy 之前收集），温柔终止父进程；若宽限期内没退干净，
+     * 再逐个强杀子孙进程并强杀父进程。Windows 上额外用 {@code taskkill /F /T}
+     * 兜底，确保 msedge/chrome 不会变成孤儿进程一直留在后台。</p>
+     */
+    public static void destroyProcessTree(Process process) {
+        destroyProcessTree(process, KILL_GRACE_SECONDS);
+    }
+
+    /**
+     * 结束整棵进程树，可指定「温柔终止」的宽限期。
+     *
+     * <p>宽限期传 0 表示立即强杀（用于关闭软件窗口这类「马上要退出、不等」的场景）。</p>
+     *
+     * @param graceSeconds 先 destroy 后等待的秒数，0 表示不等待直接强杀
+     */
+    public static void destroyProcessTree(Process process, long graceSeconds) {
+        if (process == null) {
+            return;
+        }
+        // 先收集子孙句柄（父进程退出后 descendants() 可能为空）
+        List<ProcessHandle> descendants = new ArrayList<>();
         try {
-            if (process.waitFor(KILL_GRACE_SECONDS, TimeUnit.SECONDS)) {
-                return;
-            }
+            process.toHandle().descendants().forEach(descendants::add);
+        } catch (Exception e) {
+            log.debug("获取子进程句柄失败，忽略", e);
+        }
+
+        // 1. 温柔终止父进程
+        process.destroy();
+        boolean exited = false;
+        try {
+            exited = graceSeconds <= 0 ? !process.isAlive() : process.waitFor(graceSeconds, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+
+        // 2. 强杀所有子孙进程（浏览器 / 驱动），避免变成孤儿进程
+        for (ProcessHandle handle : descendants) {
+            try {
+                if (handle.isAlive()) {
+                    handle.destroyForcibly();
+                }
+            } catch (Exception e) {
+                log.debug("强杀子进程失败，忽略", e);
+            }
+        }
+
+        if (exited && descendants.isEmpty()) {
+            return;
+        }
+
+        // 3. 父进程还在 / 有子孙残留：Windows 用 taskkill 兜底，其余平台 destroyForcibly
         if (isWindows()) {
             try {
                 // 必须带 /T：msedgedriver 与 msedge 是 Python 的子进程，

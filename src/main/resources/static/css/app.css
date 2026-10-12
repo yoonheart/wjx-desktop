@@ -1876,3 +1876,162 @@ input[type="number"]::-webkit-inner-spin-button {
     border-radius: var(--r-2);
     box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
 }
+
+/* ============ 网址输入框：历史记录下拉 ============ */
+
+/* 输入框包裹层：为下拉提供定位上下文，同时保持输入框占满剩余宽度 */
+.url-row .url-field {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+
+.url-row .url-field .form-control {
+    width: 100%;
+    /* 为右侧圆形清除按钮预留空间，避免文字与按钮重叠 */
+    padding-right: 36px;
+}
+
+/* 输入框内的圆形清除按钮：有内容时才显示 */
+.url-clear {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--surface);
+    background: var(--ink-3);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: .5;
+    transition-property: opacity, background-color;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+.url-clear:hover { opacity: 1; background: var(--ink-2); }
+
+.url-history {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 60;
+    max-height: 264px;
+    overflow-y: auto;
+    padding: var(--s1) 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    box-shadow: var(--sh-2);
+}
+
+.url-history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+}
+
+.url-history-title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.url-history-clear {
+    padding: 0;
+    font-size: 12px;
+    color: var(--ink-3);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition-property: color;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+.url-history-clear:hover { color: var(--danger); }
+
+.url-history-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.url-history-item {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    cursor: pointer;
+    transition-property: background-color;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+.url-history-item:hover { background: var(--surface-3); }
+
+.url-history-url {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--ink-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.url-history-del {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--ink-3);
+    background: transparent;
+    border: none;
+    border-radius: var(--r-1);
+    cursor: pointer;
+    transition-property: color, background-color;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+.url-history-del:hover { color: var(--danger); background: var(--danger-wash); }
+
+.url-history-empty {
+    padding: var(--s3);
+    font-size: 13px;
+    color: var(--ink-3);
+    text-align: center;
+}
+
+/* 确认框：把确认按钮置换到左侧（用于「关闭软件」这类需要明确动作的场景） */
+.modal-footer.is-reverse {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+}
+
+.modal-footer.is-reverse button {
+    margin-right: 0;
+    margin-left: var(--s2);
+}
+
+.modal-footer.is-reverse button:last-child {
+    margin-left: 0;
+}

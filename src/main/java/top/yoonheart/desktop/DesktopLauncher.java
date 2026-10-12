@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import top.yoonheart.WjxSpringbootApplication;
+import top.yoonheart.service.BrushTaskManager;
 
 import javax.swing.*;
 import java.awt.*;
@@ -42,7 +43,23 @@ public final class DesktopLauncher {
     /** 内嵌服务器端口，与 application.yml 保持一致 */
     private static final int SERVER_PORT = 8080;
 
+    /** 关闭软件的动作：由 createWindow 注册，供 /api/desktop/close 触发 */
+    private static volatile Runnable closeAction;
+
     private DesktopLauncher() {
+    }
+
+    /**
+     * 请求关闭软件（由网页里的「关闭软件」确认后经 /api/desktop/close 调用）。
+     * 真正的关闭流程在 Swing 事件线程执行。
+     */
+    public static void requestClose() {
+        Runnable action = closeAction;
+        if (action != null) {
+            SwingUtilities.invokeLater(action);
+        } else {
+            System.exit(0);
+        }
     }
 
     public static void main(String[] args) {
@@ -120,16 +137,48 @@ public final class DesktopLauncher {
         frame.getContentPane().add(browser.getUIComponent(), BorderLayout.CENTER);
         frame.setSize(1100, 760);
         frame.setLocationRelativeTo(null);
+        // 注册关闭动作：供 /api/desktop/close 触发「强杀任务 + 退出软件」
+        closeAction = () -> shutdown(cefApp, browser, frame, context);
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                shutdown(cefApp, browser, frame, context);
+                // 无运行中的任务：直接关闭
+                if (!hasRunningTask(context)) {
+                    shutdown(cefApp, browser, frame, context);
+                    return;
+                }
+                // 正在刷问卷：交给网页里的软件自带确认框。
+                // 用户点「关闭」后，页面会调用 /api/desktop/close → 强杀任务并退出软件。
+                String pageUrl = browser.getURL();
+                if (pageUrl == null || pageUrl.isBlank()) {
+                    pageUrl = "http://localhost:" + SERVER_PORT + "/";
+                }
+                browser.executeJavaScript(
+                        "(function(){"
+                                + "if (typeof window.__wjxConfirmCloseSoftware === 'function') {"
+                                + "  window.__wjxConfirmCloseSoftware();"
+                                + "} else {"
+                                + "  fetch('/api/desktop/close', {method:'POST'});"
+                                + "}"
+                                + "})();",
+                        pageUrl, 0);
             }
         });
         frame.setVisible(true);
         browser.loadURL("http://localhost:" + SERVER_PORT + "/");
 
         log.info("JCEF 桌面窗口已启动，加载 http://localhost:{}", SERVER_PORT);
+    }
+
+    /** 是否有正在刷写的任务（取不到任务管理器时按「没有」处理，直接关闭窗口） */
+    private static boolean hasRunningTask(ConfigurableApplicationContext context) {
+        try {
+            BrushTaskManager taskManager = context.getBean(BrushTaskManager.class);
+            return taskManager != null && taskManager.hasRunningTask();
+        } catch (Exception e) {
+            log.warn("获取任务管理器失败，按「无运行任务」处理", e);
+            return false;
+        }
     }
 
     /**

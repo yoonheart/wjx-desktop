@@ -214,12 +214,40 @@ def vacant(driver: WebDriver, current):
         print(f"处理填空题{current}失败: {e}")
 
 
+# 选项定位辅助：按题目块内的选项容器取选项元素列表（DOM 顺序 = 选项序号）
+def find_option_elements(driver: WebDriver, current, option_class: str):
+    """定位某题的选项元素列表。
+
+    旧实现用 `//*[@id="divN"]/div[2]/div` 数选项：当题目块内除选项容器外还有
+    题干(topichtml)、提示语(qinsert)等前置 div 时，div[2] 会指向它们而不是
+    ui-controlgroup，数出 0 个选项导致整题漏选（单选/多选最典型）。
+
+    这里改为直接按类名定位选项容器（单选 .ui-radio / 多选 .ui-checkbox），
+    取到的列表即按 DOM 顺序排列，用同一个列表做「计数」和「点击」，
+    彻底避免序号错位。
+    """
+    selectors = [
+        f'#div{current} > .ui-controlgroup > .{option_class}',
+        f'#div{current} > .ui-controlgroup > div',
+        f'#div{current} .ui-controlgroup > .{option_class}',
+        f'#div{current} .{option_class}',
+    ]
+    for selector in selectors:
+        try:
+            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+        except Exception:
+            elements = []
+        if elements:
+            return elements
+    return []
+
+
 # 单选题处理函数（新增其他选项文本输入功能）
 def single(driver: WebDriver, current):
     try:
-        xpath = f'//*[@id="div{current}"]/div[2]/div'
-        options = driver.find_elements(By.XPATH, xpath)
+        options = find_option_elements(driver, current, "ui-radio")
         if not options:
+            print(f"⚠️ 第{current}题（单选）未定位到选项，跳过以免整题漏选")
             return
 
         # 从配置中按实际题号取参数
@@ -232,9 +260,8 @@ def single(driver: WebDriver, current):
                 raise ValueError(f"第{current}题参数长度({len(p)})与选项数({len(options)})不匹配！")
             r = random.choices(range(1, len(options) + 1), weights=norm_p, k=1)[0]
 
-        # 点击选中选项
-        option_element = driver.find_element(By.CSS_SELECTOR,
-                                           f"#div{current} > div.ui-controlgroup > div:nth-child({r})")
+        # 点击选中选项（直接用定位到的元素，序号与 DOM 顺序一致）
+        option_element = options[r - 1]
         option_element.click()
 
         # 新增：检查是否是"其他"选项并处理文本输入
@@ -310,9 +337,9 @@ def droplist(driver: WebDriver, current):
 # 多选题处理函数
 def multiple(driver: WebDriver, current):
     try:
-        xpath = f'//*[@id="div{current}"]/div[2]/div'
-        options = driver.find_elements(By.XPATH, xpath)
+        options = find_option_elements(driver, current, "ui-checkbox")
         if not options:
+            print(f"⚠️ 第{current}题（多选）未定位到选项，跳过以免整题漏选")
             return
 
         # 从配置中按实际题号取参数
@@ -334,8 +361,7 @@ def multiple(driver: WebDriver, current):
 
         for idx, item in enumerate(mul_list):
             if item == 1:
-                option_element = driver.find_element(By.CSS_SELECTOR,
-                                                    f"#div{current} > div.ui-controlgroup > div:nth-child({idx + 1})")
+                option_element = options[idx]
                 option_element.click()
 
                 # 检查是否是"其他"选项并处理文本输入

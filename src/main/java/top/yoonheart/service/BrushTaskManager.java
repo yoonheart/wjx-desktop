@@ -31,6 +31,8 @@ public class BrushTaskManager {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     /** 进度轮询间隔 */
     private static final long PROGRESS_POLL_INTERVAL_MS = 500L;
+    /** 停止宽限期：写入 stop_file 后等待多久进程仍不退，则强制结束进程树（毫秒） */
+    private static final long FORCE_KILL_GRACE_MS = 5000L;
     /**
      * 已结束任务的最大保留条数。
      *
@@ -75,8 +77,11 @@ public class BrushTaskManager {
             String updatedConfigJson = withRuntimePaths(task);
 
             // 执行Python脚本（结果通过进度文件回传，此处仅记录输出尾部便于排查）
+            // 第二参数把进程句柄交给本任务，供停止时强杀整棵进程树（顺带关掉浏览器）
             String result = PythonExecutor.executePythonScript(
-                    PythonExecutor.resolveScriptPath("scripts/wjx2.py"), updatedConfigJson);
+                    PythonExecutor.resolveScriptPath("scripts/wjx2.py"),
+                    task::setProcess,
+                    updatedConfigJson);
             logTail(task.getTaskId(), result);
 
             // 标记任务完成（若用户已手动停止，保持STOPPED状态不被覆盖）
@@ -352,5 +357,69 @@ public class BrushTaskManager {
         // 顺带 complete 一下，释放服务端的异步请求上下文。
         // 若前端之后重新订阅进度，registerEmitter 会重新创建集合。
         completeEmitters(taskId);
+
+        // 强杀兜底：仅写 stop_file 对「卡死」（界面模式下 Python 阻塞在同步 Selenium
+        // 调用里、读不到标志文件）无效，浏览器也就不会关闭。这里安排宽限期后的强杀，
+        // 保证停止一定生效、浏览器被关掉。
+        scheduleForceKill(task);
+    }
+
+    /**
+     * 计划强杀：停止信号发出后等待 {@link #FORCE_KILL_GRACE_MS}，
+     * 若进程仍存活则强杀整棵进程树（含 msedgedriver 与 msedge 浏览器）。
+     */
+    private void scheduleForceKill(BrushTask task) {
+        Process process = task.getProcess();
+        if (process == null) {
+            return;
+        }
+        Thread killer = new Thread(() -> {
+            try {
+                Thread.sleep(FORCE_KILL_GRACE_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (process.isAlive()) {
+                log.warn("任务 {} 收到停止信号 {} 秒后仍未退出，强制结束进程树（含浏览器）",
+                        task.getTaskId(), FORCE_KILL_GRACE_MS / 1000);
+                PythonExecutor.destroyProcessTree(process);
+            }
+        }, "wjx-force-killer");
+        killer.setDaemon(true);
+        killer.start();
+    }
+
+    /** 是否有任务正在运行（供桌面端关闭窗口前判断是否需要提示） */
+    public boolean hasRunningTask() {
+        return tasks.values().stream()
+                .anyMatch(t -> t.getStatus() == BrushTask.TaskStatus.RUNNING);
+    }
+
+    /**
+     * 立即强制结束所有正在运行的任务（含其拉起的浏览器）。
+     *
+     * <p>桌面端关闭软件窗口时调用：用户已确认「关闭窗口即停止刷问卷」，
+     * 这里不再走等待宽限期，而是直接把整棵进程树强杀，保证窗口关闭后
+     * 不会残留正在刷题的 Python / 浏览器进程。</p>
+     */
+    public void forceStopAllRunningTasks() {
+        for (BrushTask task : tasks.values()) {
+            if (task.getStatus() != BrushTask.TaskStatus.RUNNING) {
+                continue;
+            }
+            task.setStatus(BrushTask.TaskStatus.STOPPED);
+            // 先写停止标志文件（能优雅退出最好），随后无论是否退出都直接强杀
+            try {
+                new File(task.getStopFilePath()).createNewFile();
+            } catch (IOException e) {
+                log.debug("创建停止标志文件失败：{}", task.getStopFilePath(), e);
+            }
+            Process process = task.getProcess();
+            if (process != null && process.isAlive()) {
+                log.info("关窗退出：强制结束正在运行的任务 {}（含浏览器）", task.getTaskId());
+                PythonExecutor.destroyProcessTree(process, 0L);
+            }
+        }
     }
 }

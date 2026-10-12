@@ -16,6 +16,13 @@ public class BrushTask {
     private final AtomicInteger failedCount = new AtomicInteger(0);
     private final String progressFilePath;
     private final String stopFilePath;
+    /**
+     * 正在运行的 Python 子进程句柄。
+     *
+     * <p>由 Python 执行器在进程启动后回调写入，供停止任务时强杀整棵进程树
+     * （否则脚本卡死时停止无效，浏览器也不会关闭）。</p>
+     */
+    private volatile Process process;
 
     public BrushTask(String taskId, String configJson, String url, int targetCount) {
         this.taskId = taskId;
@@ -87,6 +94,14 @@ public class BrushTask {
 
     public String getStopFilePath() {
         return stopFilePath;
+    }
+
+    public Process getProcess() {
+        return process;
+    }
+
+    public void setProcess(Process process) {
+        this.process = process;
     }
 
     // 获取进度JSON字符串
