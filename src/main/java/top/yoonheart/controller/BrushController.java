@@ -34,8 +34,10 @@ public class BrushController {
     /** 单个任务允许的目标份数范围 */
     private static final int MIN_TARGET_COUNT = 1;
     private static final int MAX_TARGET_COUNT = 1000;
-    /** 当前仅支持 2 个窗口 */
-    private static final int SUPPORTED_THREADS = 2;
+    /** 支持的倍速档位（同时开几个窗口填）：二倍速 / 四倍速 / 六倍速 */
+    private static final List<Integer> SUPPORTED_THREADS = List.of(2, 4, 6);
+    /** 默认倍速（未选择时按二倍速执行，与历史行为一致） */
+    private static final int DEFAULT_THREADS = 2;
     /**
      * 任务序号，用于保证 taskId 唯一。
      *
@@ -69,12 +71,12 @@ public class BrushController {
             if (targetCount < MIN_TARGET_COUNT || targetCount > MAX_TARGET_COUNT) {
                 return Result.error("份数必须在1-1000之间，请重新设置");
             }
-            // 窗口数默认 2
+            // 倍速（窗口数）：默认二倍速，只接受 2 / 4 / 6
             if (speedMultiplier == null) {
-                speedMultiplier = SUPPORTED_THREADS;
+                speedMultiplier = DEFAULT_THREADS;
             }
-            if (speedMultiplier != SUPPORTED_THREADS) {
-                return Result.error("窗口数必须为2，请重新设置");
+            if (!SUPPORTED_THREADS.contains(speedMultiplier)) {
+                return Result.error("倍速只能选择二倍速、四倍速或六倍速，请重新设置");
             }
 
             String taskId = "task_" + System.currentTimeMillis() + "_" + TASK_SEQ.incrementAndGet();
@@ -116,6 +118,72 @@ public class BrushController {
                 config.put("ip_max_use", 1);  // 一个IP只填一份
             }
 
+            // 提交来源比例：开启后按比例把答卷伪装成 手机 / 链接 / 微信 提交
+            // （问卷星完全按 User-Agent 判定来源，故只需控制 UA）
+            Boolean sourceEnabled = (Boolean) requestData.get("sourceEnabled");
+            if (sourceEnabled != null && sourceEnabled) {
+                int mobile = 33;
+                int link = 33;
+                int wechat = 34;
+                Object rawRatio = requestData.get("sourceRatio");
+                if (rawRatio instanceof Map<?, ?> ratioMap) {
+                    mobile = clampInt(ratioMap.get("mobile"), 0, 100, 33);
+                    link = clampInt(ratioMap.get("link"), 0, 100, 33);
+                    wechat = clampInt(ratioMap.get("wechat"), 0, 100, 34);
+                }
+                Map<String, Object> sourceRatio = new LinkedHashMap<>();
+                sourceRatio.put("mobile", mobile);
+                sourceRatio.put("link", link);
+                sourceRatio.put("wechat", wechat);
+                config.put("source_ratio", sourceRatio);
+            }
+
+            // 信效度优化：按维度生成量表题 / 矩阵题作答，使其在 SPSS 里能达到目标信度
+            Boolean validityEnabled = (Boolean) requestData.get("validityEnabled");
+            if (validityEnabled != null && validityEnabled) {
+                config.put("validity_optimize", true);
+                config.put("validity_target",
+                        clampDouble(requestData.get("validityTarget"), 0.30, 0.90, 0.80));
+                Object dims = requestData.get("validityDimensions");
+                if (dims instanceof String text && !text.isBlank()) {
+                    config.put("validity_dimensions", text.trim());
+                }
+                // 手动指定「单选题形式的李克特量表」题号：问卷星里 1~5 打分常用单选题录入
+                // （编码 3），默认不参与信效度；这里允许用户点名让它们也一起优化。
+                Object singleScale = requestData.get("validitySingleQuestions");
+                if (singleScale instanceof String text && !text.isBlank()) {
+                    config.put("validity_single_questions", text.trim());
+                }
+                // 维度间相关（可选）：按上三角填写，如 3 个维度 "0.45,0.30;0.35"；留空 = 各维度独立
+                Object corr = requestData.get("validityCorrelation");
+                if (corr instanceof String corrText && !corrText.isBlank()) {
+                    config.put("validity_correlation", corrText.trim());
+                }
+                // 反向计分题号（可选）：这些题的作答按 k+1-r 翻转，如 "25+30"
+                Object reverse = requestData.get("validityReverse");
+                if (reverse instanceof String revText && !revText.isBlank()) {
+                    config.put("validity_reverse", revText.trim());
+                }
+            }
+
+            // 合成答卷规格：由导入的 JSON 带来（synth 段），Python 侧据此生成每一份答卷
+            // 并整批校验 α / KMO / 显著项个数。这里只做结构性的最低校验与透传，
+            // 统计层面的校验必须放到 Python 里做 —— 那需要真实计算，不能靠前端猜。
+            Object synth = requestData.get("synth");
+            if (synth instanceof Map<?, ?> synthMap && !synthMap.isEmpty()) {
+                boolean synthEnabled = Boolean.TRUE.equals(synthMap.get("enabled"));
+                Object synthOutcome = synthMap.get("outcome");
+                boolean hasOutcome = synthOutcome instanceof Map<?, ?> om
+                        && om.get("question") instanceof Number;
+                if (synthEnabled && !hasOutcome) {
+                    return Result.error("合成答卷已启用，但没有指定因变量（synth.outcome.question），请重新导入配置");
+                }
+                if (synthEnabled) {
+                    config.put("synth", synthMap);
+                    log.info("合成答卷已启用：outcome={}", synthOutcome);
+                }
+            }
+
             // 各题型的概率配置
             applyQuestionConfig(config, questions);
 
@@ -152,12 +220,38 @@ public class BrushController {
         return null;
     }
 
-    /** 把填写时长限制在 30~150 秒内，非法值回退到默认值 */
+    /** 把填写时长限制在 10~360 秒（10 秒 ~ 6 分钟）内，非法值回退到默认值 */
     private static int normalizeFillTime(Integer value, int fallback) {
-        if (value == null || value < 30 || value > 150) {
+        if (value == null || value < 10 || value > 360) {
             return fallback;
         }
         return value;
+    }
+
+    /** 宽松取整并夹到 [min, max]，非法时返回兜底值 */
+    private static int clampInt(Object raw, int min, int max, int fallback) {
+        Integer value = toInt(raw);
+        if (value == null) {
+            return fallback;
+        }
+        return Math.min(max, Math.max(min, value));
+    }
+
+    /** 宽松转 double 并夹到 [min, max]，非法时返回兜底值 */
+    private static double clampDouble(Object raw, double min, double max, double fallback) {
+        double value;
+        if (raw instanceof Number number) {
+            value = number.doubleValue();
+        } else if (raw instanceof String text) {
+            try {
+                value = Double.parseDouble(text.trim());
+            } catch (NumberFormatException e) {
+                return fallback;
+            }
+        } else {
+            return fallback;
+        }
+        return Math.min(max, Math.max(min, value));
     }
 
     /**
@@ -172,8 +266,12 @@ public class BrushController {
         Map<String, Object> otherTextsProb = new LinkedHashMap<>();
         Map<String, Object> texts = new LinkedHashMap<>();
         Map<String, Object> textsProb = new LinkedHashMap<>();
+        // 「答案唯一」的空：值为 true，键与 texts 一致（填空=题号，选项文本=题号_选项序号）。
+        // Python 侧据此为这些空建立答案池，每份问卷领一条、互不重复。
+        Map<String, Object> textsUnique = new LinkedHashMap<>();
         Map<String, Object> scaleProb = new LinkedHashMap<>();
         Map<String, Object> matrixProb = new LinkedHashMap<>();
+        Map<String, Object> droplistProb = new LinkedHashMap<>();
 
         if (questions instanceof List<?> questionsList) {
             for (Object questionObj : questionsList) {
@@ -189,13 +287,15 @@ public class BrushController {
                 switch (qtype) {
                     case "单选题" -> {
                         putOptionProbs(singleProb, qid, questionMap.get("options"));
-                        putOptionTextAnswers(singleOtherTexts, singleOtherTextsProb, qid,
-                                questionMap.get("optionTextAnswers"));
+                        putOptionTextAnswers(singleOtherTexts, singleOtherTextsProb, textsUnique, qid,
+                                questionMap.get("optionTextAnswers"),
+                                questionMap.get("optionTextAnswersMode"));
                     }
                     case "多选题" -> {
                         putOptionProbs(multipleProb, qid, questionMap.get("options"));
-                        putOptionTextAnswers(otherTexts, otherTextsProb, qid,
-                                questionMap.get("optionTextAnswers"));
+                        putOptionTextAnswers(otherTexts, otherTextsProb, textsUnique, qid,
+                                questionMap.get("optionTextAnswers"),
+                                questionMap.get("optionTextAnswersMode"));
                     }
                     case "填空题" -> {
                         // 优先使用 textAnswers，为空时回退到 options（兼容旧格式）
@@ -203,10 +303,12 @@ public class BrushController {
                         if (!(textAnswers instanceof List<?> list) || list.isEmpty()) {
                             textAnswers = questionMap.get("options");
                         }
-                        putTextAnswers(texts, textsProb, qid, textAnswers);
+                        putTextAnswers(texts, textsProb, textsUnique, qid, textAnswers,
+                                questionMap.get("textAnswersMode"));
                     }
                     case "量表题" -> putOptionProbs(scaleProb, qid, questionMap.get("options"));
                     case "矩阵题" -> putMatrixProbs(matrixProb, qid, questionMap.get("options"));
+                    case "下拉框" -> putOptionProbs(droplistProb, qid, questionMap.get("options"));
                     default -> {
                         // 其他题型暂不处理
                     }
@@ -222,8 +324,10 @@ public class BrushController {
         config.put("other_texts_prob", otherTextsProb);
         config.put("texts", texts);
         config.put("texts_prob", textsProb);
+        config.put("texts_unique", textsUnique);
         config.put("scale_prob", scaleProb);
         config.put("matrix_prob", matrixProb);
+        config.put("droplist_prob", droplistProb);
     }
 
     /** 单选/多选/量表题：选项概率列表 */
@@ -245,10 +349,12 @@ public class BrushController {
 
     /** 单选/多选题：带文本输入框的选项，其候选文本与概率 */
     private static void putOptionTextAnswers(Map<String, Object> texts, Map<String, Object> probs,
-                                             String qid, Object optionTextAnswers) {
+                                             Map<String, Object> unique,
+                                             String qid, Object optionTextAnswers, Object mode) {
         if (!(optionTextAnswers instanceof Map<?, ?> answerMap)) {
             return;
         }
+        Map<?, ?> modeMap = (mode instanceof Map<?, ?> m) ? m : null;
         for (Object optionIndex : answerMap.keySet()) {
             Object answers = answerMap.get(optionIndex);
             if (!(answers instanceof List<?> answerList) || answerList.isEmpty()) {
@@ -270,13 +376,18 @@ public class BrushController {
                 String key = qid + "_" + optionIndex;
                 texts.put(key, textList);
                 probs.put(key, probList);
+                if (modeMap != null
+                        && "unique".equals(String.valueOf(modeMap.get(String.valueOf(optionIndex))))) {
+                    unique.put(key, true);
+                }
             }
         }
     }
 
     /** 填空题：候选文本与概率 */
     private static void putTextAnswers(Map<String, Object> texts, Map<String, Object> probs,
-                                       String qid, Object textAnswers) {
+                                       Map<String, Object> unique, String qid, Object textAnswers,
+                                       Object mode) {
         if (!(textAnswers instanceof List<?> answerList) || answerList.isEmpty()) {
             return;
         }
@@ -285,12 +396,16 @@ public class BrushController {
         for (Object answer : answerList) {
             if (answer instanceof Map<?, ?> entry) {
                 textList.add((String) entry.get("text"));
-                probList.add((Integer) entry.get("probability"));
+                Integer probability = toInt(entry.get("probability"));
+                probList.add(probability != null ? probability : 0);
             }
         }
         if (!textList.isEmpty()) {
             texts.put(qid, textList);
             probs.put(qid, probList);
+            if ("unique".equals(String.valueOf(mode))) {
+                unique.put(qid, true);
+            }
         }
     }
 

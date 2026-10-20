@@ -16,6 +16,18 @@ const ProbabilityValidator = {
     },
 
     // 验证所有题目
+    /**
+     * 合成答卷是否接管了作答。
+     *
+     * 开启后每份问卷的答案都由统计引擎生成，概率只决定「单题的边缘分布」，
+     * 不再是提交时的抽样依据。所以整题概率全 0 不该拦 —— 引擎会用默认分布兜底。
+     * 有非 0 值时仍然要求合计 100（那是用户明确指定的分布）。
+     */
+    synthTakesOver: function() {
+        const sw = document.getElementById('synthSwitch');
+        return !!(sw && sw.checked);
+    },
+
     validateAll: function() {
         const errors = [];
         
@@ -53,6 +65,9 @@ const ProbabilityValidator = {
                 case '量表题':
                     result = this.validateScale(questionId);
                     break;
+                case '下拉框':
+                    result = this.validateDropdown(questionId);
+                    break;
                 default:
                     result = { isValid: true, errors: [] };
             }
@@ -63,6 +78,27 @@ const ProbabilityValidator = {
         });
         
         
+        // 「答案唯一」的空（填空 / 选项文本）：条数必须与目标份数一致，多了少了都不行。
+        // 这一步放在开刷前兜底——保存时已校验过一次，但用户可能在保存后又改了目标份数。
+        (function checkUniqueAnswerCount() {
+            const modeMap = window.textAnswersMode || {};
+            const answerMap = window.textAnswersConfig || {};
+            const targetInput = document.getElementById('targetCount');
+            const targetCount = targetInput ? (parseInt(targetInput.value, 10) || 0) : 0;
+
+            Object.keys(modeMap).forEach(function(configKey) {
+                if (modeMap[configKey] !== 'unique') {
+                    return;
+                }
+                const answers = answerMap[configKey] || [];
+                if (answers.length !== targetCount) {
+                    const questionId = configKey.split('_')[0];
+                    errors.push(`第${questionId}题已开启「答案唯一」：已填 ${answers.length} 条答案，`
+                        + `目标份数 ${targetCount} 份，两者必须一致（多了不行，少了也不行）`);
+                }
+            });
+        })();
+
         // 检查是否所有验证都通过
         const isValid = errors.length === 0;
         
@@ -131,7 +167,7 @@ const ProbabilityValidator = {
         } else {
             // 检查概率总和是否为100%
             const sum = probabilities.reduce((acc, curr) => acc + curr, 0);
-            if (sum !== 100) {
+            if (sum !== 100 && !(sum === 0 && this.synthTakesOver())) {
                 errors.push(`第${questionId}题（单选题）所有选项的概率之和必须为100%，当前总和为${sum}%`);
                 // 为所有有效输入框添加错误样式
                 validInputs.forEach(input => {
@@ -232,7 +268,7 @@ const ProbabilityValidator = {
         } else {
             // 检查概率总和是否为100%
             const sum = probabilities.reduce((acc, curr) => acc + curr, 0);
-            if (sum !== 100) {
+            if (sum !== 100 && !(sum === 0 && this.synthTakesOver())) {
                 errors.push(`第${questionId}题（多选题）所有选项的概率之和必须为100%，当前总和为${sum}%`);
                 validInputs.forEach(input => {
                     input.classList.add('is-invalid');
@@ -360,7 +396,7 @@ const ProbabilityValidator = {
             } else {
                 // 检查当前行概率总和是否为100%
                 const sum = probabilities.reduce((acc, curr) => acc + curr, 0);
-                if (sum !== 100) {
+                if (sum !== 100 && !(sum === 0 && this.synthTakesOver())) {
                     errors.push(`第${questionId}题（矩阵题）第${rowIndex + 1}行所有选项的概率之和必须为100%，当前总和为${sum}%`);
                     // 为当前行所有有效输入框添加错误样式
                     validInputs.forEach(input => {
@@ -446,7 +482,7 @@ const ProbabilityValidator = {
         } else {
             // 检查概率总和是否为100%
             const sum = probabilities.reduce((acc, curr) => acc + curr, 0);
-            if (sum !== 100) {
+            if (sum !== 100 && !(sum === 0 && this.synthTakesOver())) {
                 errors.push(`第${questionId}题（量表题）所有选项的概率之和必须为100%，当前总和为${sum}%`);
                 // 为所有有效输入框添加错误样式
                 validInputs.forEach(input => {
@@ -488,6 +524,70 @@ const ProbabilityValidator = {
         };
     },
     
+    // 验证下拉框题
+    // 下拉框只对「真正的选项」配置概率（首项「请选择」为占位项，无输入框），
+    // 规则同单选题：每个真实选项都要填，概率之和为 100%
+    validateDropdown: function(questionId) {
+        const errors = [];
+        const questionContainer = document.querySelector(`[data-question-id="${questionId}"]`);
+        const probabilityInputs = questionContainer.querySelectorAll('.probability-input');
+
+        // 收集所有已填写的概率值
+        const probabilities = [];
+        const validInputs = [];
+
+        probabilityInputs.forEach((input, index) => {
+            // 先移除可能存在的错误样式
+            input.classList.remove('is-invalid');
+            input.parentElement.querySelector('.invalid-feedback')?.remove();
+
+            const value = input.value.trim();
+            if (value) {
+                const num = this.parseProbability(value);
+                if (num === null) {
+                    errors.push(`第${questionId}题（下拉框）选项${index + 1}的概率不是有效数字`);
+                    this.showInputError(input);
+                } else if (num < 0 || num > 100) {
+                    errors.push(`第${questionId}题（下拉框）选项${index + 1}的概率必须在0-100之间`);
+                    this.showInputError(input);
+                } else {
+                    input.classList.remove('is-invalid');
+                    probabilities.push(num);
+                    validInputs.push(input);
+                }
+            }
+        });
+
+        // 检查是否所有选项都填写了概率
+        if (probabilities.length !== probabilityInputs.length) {
+            errors.push(`第${questionId}题（下拉框）请为所有选项填写概率`);
+            probabilityInputs.forEach(input => {
+                if (!input.value.trim()) {
+                    this.showInputError(input);
+                }
+            });
+        } else {
+            // 检查概率总和是否为100%
+            const sum = probabilities.reduce((acc, curr) => acc + curr, 0);
+            if (sum !== 100 && !(sum === 0 && this.synthTakesOver())) {
+                errors.push(`第${questionId}题（下拉框）所有选项的概率之和必须为100%，当前总和为${sum}%`);
+                validInputs.forEach(input => {
+                    input.classList.add('is-invalid');
+                });
+            } else {
+                validInputs.forEach(input => {
+                    input.classList.remove('is-invalid');
+                });
+                this.clearQuestionError(questionContainer);
+            }
+        }
+
+        return {
+            isValid: errors.length === 0,
+            errors: errors
+        };
+    },
+
     // 验证文本答案
     validateTextAnswers: function(textAnswers) {
         const errors = [];
@@ -542,7 +642,7 @@ const ProbabilityValidator = {
         // 检查概率总和是否为100%
         if (probabilities.length === answerItems.length) {
             const sum = probabilities.reduce((acc, curr) => acc + curr, 0);
-            if (sum !== 100) {
+            if (sum !== 100 && !(sum === 0 && this.synthTakesOver())) {
                 errors.push(`文本答案的概率之和必须为100%，当前总和为${sum}%`);
                 // 为所有概率输入框添加错误样式
                 answerItems.forEach(item => {
@@ -718,6 +818,9 @@ const ProbabilityValidator = {
                 break;
             case '量表题':
                 result = this.validateScale(questionId);
+                break;
+            case '下拉框':
+                result = this.validateDropdown(questionId);
                 break;
             default:
                 result = { isValid: true, errors: [] };

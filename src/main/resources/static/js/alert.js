@@ -27,7 +27,8 @@ function getToastStack() {
     return stack;
 }
 
-function showAlert(message, type = 'error') {
+// duration：停留毫秒数，传 0 表示不自动消失（长消息用，比如导入结果）
+function showAlert(message, type = 'error', duration = ALERT_DURATION) {
     const stack = getToastStack();
     const kind = ALERT_ICONS[type] ? type : 'info';
     const text = String(message == null ? '' : message);
@@ -66,11 +67,16 @@ function showAlert(message, type = 'error') {
 
     let timer = null;
     let dismissed = false;
+    // 悬停暂停倒计时：deadlineAt = 最初设定的关闭时刻（毫秒时间戳）；
+    // remainMs = 悬停瞬间「还差多久关闭」，移开后按它重新起计时器
+    let deadlineAt = 0;
+    let remainMs = 0;
 
     function dismiss() {
         if (dismissed) return;
         dismissed = true;
         if (timer) clearTimeout(timer);
+        timer = null;
         el.classList.remove('is-visible');
         el.classList.add('is-leaving');
         setTimeout(() => el.remove(), ALERT_LEAVE_MS);
@@ -78,12 +84,31 @@ function showAlert(message, type = 'error') {
 
     closeBtn.addEventListener('click', dismiss);
 
+    // 鼠标悬停在提示条上 → 暂停自动消失；移开 → 接着倒计时。
+    // 只有「会自动消失」的提示（duration > 0）才需要这个行为；
+    // 导入结果这类 duration=0 的长消息本来就常驻，悬停无影响。
+    el.addEventListener('mouseenter', function () {
+        if (dismissed || !timer) return;
+        clearTimeout(timer);
+        timer = null;
+        remainMs = Math.max(0, deadlineAt - Date.now());
+    });
+    el.addEventListener('mouseleave', function () {
+        if (dismissed || remainMs <= 0) return;
+        timer = setTimeout(dismiss, remainMs);
+        remainMs = 0;
+    });
+
     // 按时间顺序往下排：新的追加在最下面
     stack.appendChild(el);
     // 下一帧再加可见类，保证进场过渡能触发
     requestAnimationFrame(() => el.classList.add('is-visible'));
 
-    timer = setTimeout(dismiss, ALERT_DURATION);
+    const stay = Number(duration);
+    if (Number.isFinite(stay) && stay > 0) {
+        deadlineAt = Date.now() + stay;
+        timer = setTimeout(dismiss, stay);
+    }
 }
 
 // 导出函数（如果需要模块使用）

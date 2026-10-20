@@ -14,7 +14,7 @@
     <div class="top-rule"></div>
 
     <header class="wrap appbar">
-        <button type="button" class="btn btn-sm" onclick="confirmBack()">
+        <button type="button" class="btn btn-sm" id="backBtn" onclick="confirmBack()">
             <i class="fa fa-arrow-left" aria-hidden="true"></i> 返回首页
         </button>
         <span class="appbar-title">问卷解析结果</span>
@@ -43,6 +43,12 @@
                 </button>
                 <button type="button" class="btn btn-sm btn-info" id="historyBtn">
                     <i class="fa fa-history" aria-hidden="true"></i> 历史运行记录
+                </button>
+                <button type="button" class="btn btn-sm" id="importConfigBtn" title="从 json 文件导入本问卷的配置">
+                    <i class="fa fa-upload" aria-hidden="true"></i> 导入配置
+                </button>
+                <button type="button" class="btn btn-sm" id="exportConfigBtn" title="把本问卷每道题的配置与功能详细设置导出为 json 文件">
+                    <i class="fa fa-download" aria-hidden="true"></i> 导出配置
                 </button>
             </div>
         </section>
@@ -99,22 +105,35 @@
     <div class="modal-content">
         <button type="button" class="close" aria-label="关闭">&times;</button>
         <div class="modal-title">配置该题文本答案</div>
-        <p class="modal-note">总概率相加须得 100</p>
+        <p class="modal-note" id="textAnswerNote">总概率相加须得 100</p>
 
         <div id="answerList">
             <div class="answer-item">
                 <input type="text" id="answerText0" class="answer-text form-control"
                        placeholder="输入文本答案" aria-label="文本答案">
-                <input type="number" id="answerProb0" class="probability-input form-control"
-                       placeholder="概率" aria-label="概率" min="0" max="100">
-                <span class="mono-label">%</span>
+                <span class="answer-prob-group">
+                    <input type="number" id="answerProb0" class="probability-input form-control"
+                           placeholder="概率" aria-label="概率" min="0" max="100">
+                    <span class="mono-label">%</span>
+                </span>
                 <button type="button" class="btn btn-sm btn-danger" onclick="removeAnswerItem(this)">删除</button>
             </div>
         </div>
 
         <div class="modal-footer">
-            <button type="button" class="btn btn-sm" onclick="addAnswerItem()">添加答案</button>
-            <button type="button" class="btn btn-primary" onclick="saveTextAnswers()">保存</button>
+            <!-- 左下角：答案唯一切换（默认关闭）＋ 说明问号 -->
+            <div class="modal-footer-left">
+                <div class="form-check form-switch">
+                    <input type="checkbox" id="answerUniqueSwitch" class="form-check-input">
+                    <label class="form-check-label" for="answerUniqueSwitch">答案唯一</label>
+                </div>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="开启后，问卷对于该空的选择唯一，不会重复"></i>
+            </div>
+            <div class="modal-footer-right">
+                <button type="button" class="btn btn-sm" onclick="addAnswerItem()">添加答案</button>
+                <button type="button" class="btn btn-primary" onclick="saveTextAnswers()">保存</button>
+            </div>
         </div>
     </div>
 </div>
@@ -126,7 +145,7 @@
         <div class="modal-title">系统使用须知</div>
 
         <div class="modal-body">
-            <p>目前支持单选题、多选题、填空题、量表题、矩阵题，理论上支持排序题。</p>
+            <p>目前支持单选题、多选题、填空题、量表题、矩阵题、下拉框题，理论上支持排序题。</p>
 
             <h6>单选题</h6>
             <p>每道题需要设置 n 份问卷里每个选项出现的概率，各选项概率之和应为 100。
@@ -151,6 +170,10 @@
             <h6>矩阵题</h6>
             <img src="static/pictures/矩阵.png" alt="矩阵题示例">
             <p>矩阵题每一行算一道题，一行的概率之和为 100。</p>
+
+            <h6>下拉框题</h6>
+            <p>下拉框题同单选题：为每个真实选项设置出现概率，概率之和为 100。
+                列表中第一项「请选择」为占位项，无需配置概率。</p>
 
             <h6>份数与耗时</h6>
             <p>问卷总份数在 <strong>1~1000 份</strong>之间。可以用<strong>一键随机概率</strong>按钮快速设置概率。
@@ -194,7 +217,7 @@
                 <label class="form-check-label" for="proxySwitch">ip代理</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               title="若要刷问卷这个功能必须开启！！！这个功能用大白话讲就是每台电脑最多可以刷12份问卷，
+               data-tip="若要刷问卷这个功能必须开启！！！这个功能用大白话讲就是每台电脑最多可以刷12份问卷，
                开启以后，就会有无穷多台电脑给你填问卷，因为需要一定成本，所以这里仅提供大约40个ip试用，
                如果想要刷更多的问卷，需要自己上其他提供ip代理的网站获取链接！！！"></i>
             <span id="apiUrlGroup" class="grow">
@@ -210,7 +233,7 @@
                 <label class="form-check-label" for="guiMode">界面模式</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               title="开启后弹出浏览器窗口，可实时观看填写过程，查看是否会出什么问题；默认关闭，浏览器在后台静默运行"></i>
+               data-tip="开启后弹出浏览器窗口，可实时观看填写过程，查看是否会出什么问题；默认关闭，浏览器在后台静默运行"></i>
         </div>
 
         <!-- 时间控制 -->
@@ -220,16 +243,197 @@
                 <label class="form-check-label" for="timeControlSwitch">单份问卷时间控制</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               title="开启后每份问卷填写时间在设定区间内随机，且一个IP只填一份"></i>
+               data-tip="开启后，每份问卷的填写耗时会在这个区间内随机，更像真人作答。可填范围 10 秒 ~ 360 秒（6 分钟）。开启后同一个 IP 只能填一份。"></i>
             <span id="timeControlGroup" class="grow is-hidden">
                 <span class="field-inline">
                     <input type="number" id="minFillTime" class="form-control time-input"
-                           min="30" max="150" value="30" aria-label="最短填写秒数">
+                           min="10" max="360" value="30" aria-label="最短填写秒数">
                     <span class="mono-label">秒 ~</span>
                     <input type="number" id="maxFillTime" class="form-control time-input"
-                           min="30" max="150" value="150" aria-label="最长填写秒数">
+                           min="10" max="360" value="150" aria-label="最长填写秒数">
                     <span class="mono-label">秒</span>
                 </span>
+            </span>
+        </div>
+
+        <!-- 倍速（同时开几个窗口填） -->
+        <div class="setting-row">
+            <span class="setting-label">倍速</span>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="同时开几个浏览器窗口一起填。倍速越高越快，但更占电脑资源、消耗的代理 IP 也更多；网络或代理不稳时建议用二倍速。"></i>
+            <span class="grow seg-group" id="speedGroup">
+                <button type="button" class="btn btn-sm seg-btn is-active" data-speed="2">二倍速</button>
+                <button type="button" class="btn btn-sm seg-btn" data-speed="4">四倍速</button>
+                <button type="button" class="btn btn-sm seg-btn" data-speed="6">六倍速</button>
+            </span>
+        </div>
+
+        <!-- 提交来源比例 -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="sourceRatioSwitch" class="form-check-input">
+                <label class="form-check-label" for="sourceRatioSwitch">提交来源比例</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="问卷星按浏览器标识判定答卷来源。开启后，刷出的答卷会按下面的比例分别记成手机、链接、微信提交；不开启则全部记为链接提交。"></i>
+            <span class="grow">
+                <span id="sourceRatioTotal" class="mono-label">合计 100%</span>
+            </span>
+        </div>
+        <div id="sourceRatioGroup" class="source-ratio is-hidden">
+            <div class="source-item">
+                <span class="source-label">手机提交</span>
+                <input type="range" id="srcMobileRange" class="source-range" min="0" max="100" value="33" aria-label="手机提交比例">
+                <span class="source-value">
+                    <input type="number" id="srcMobile" class="form-control source-input" min="0" max="100" value="33" aria-label="手机提交比例">
+                    <span class="mono-label">%</span>
+                </span>
+            </div>
+            <div class="source-item">
+                <span class="source-label">链接提交</span>
+                <input type="range" id="srcLinkRange" class="source-range" min="0" max="100" value="33" aria-label="链接提交比例">
+                <span class="source-value">
+                    <input type="number" id="srcLink" class="form-control source-input" min="0" max="100" value="33" aria-label="链接提交比例">
+                    <span class="mono-label">%</span>
+                </span>
+            </div>
+            <div class="source-item">
+                <span class="source-label">微信提交</span>
+                <input type="range" id="srcWechatRange" class="source-range" min="0" max="100" value="34" aria-label="微信提交比例">
+                <span class="source-value">
+                    <input type="number" id="srcWechat" class="form-control source-input" min="0" max="100" value="34" aria-label="微信提交比例">
+                    <span class="mono-label">%</span>
+                </span>
+            </div>
+        </div>
+
+        <!-- 信效度优化 -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="validitySwitch" class="form-check-input">
+                <label class="form-check-label" for="validitySwitch">信效度优化</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="开启后，属于同一组的那几道量表题会「抱团作答」，方向保持一致。这样导出的数据拿去 SPSS 做信度分析（Cronbach α）和效度分析（因子分析）时才好看。能参与的题：量表题、矩阵题，以及在「单选量表题号」里指定过的单选题；其它题型照旧按你设的百分比随机填。"></i>
+            <span id="validityGroup" class="grow is-hidden">
+                <span class="field-inline">
+                    <span class="mono-label">目标信度</span>
+                    <select id="validityTarget" class="form-control select-sm" aria-label="目标信度">
+                        <option value="0.70">0.70（合格）</option>
+                        <option value="0.80" selected>0.80（良好）</option>
+                        <option value="0.85">0.85（优秀）</option>
+                    </select>
+                    <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                       data-tip="你想要达到的 Cronbach α 数值：0.70 合格、0.80 良好、0.85 优秀。设得越高，程序让题目「抱团」的力度越大。注意：如果你把某些选项的概率设成 0%，实际结果会比你设的目标低一点，这种情况可以把目标调高一档。"></i>
+                </span>
+            </span>
+        </div>
+        <div id="validityDimGroup" class="setting-row setting-row--block is-hidden">
+            <span class="field-inline dim-label">
+                <label class="mono-label" for="validityDimensions">维度分组</label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="告诉程序「哪几道题是在测同一件事」。例：1-5, 6-10 表示第 1~5 题一组、第 6~10 题一组。题目不相邻时用加号连起来，如 1+3+5, 2+4+6。留空 = 把全部能参与的题当成同一组。可以填量表题、矩阵题，以及在下方「单选量表题号」里指定过的单选题；填了其它题号不会生效，下面会实时提醒。"></i>
+            </span>
+            <span class="dim-field">
+                <input type="text" id="validityDimensions" class="form-control"
+                       placeholder="例：1-5, 6-10   不相邻写 1+3+5（留空 = 全部当作一组）">
+                <span id="validityHint" class="validity-hint" role="status"></span>
+            </span>
+        </div>
+        <div id="validityCorrGroup" class="setting-row setting-row--block is-hidden">
+            <span class="field-inline dim-label">
+                <label class="mono-label" for="validityCorrelation">维度间相关</label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="分了 2 个以上维度时才有意义。真实问卷里不同维度之间总会有点关系（比如「经济回报」和「职业发展」大概相关 0.4），全是 0 反而不像真的，区别效度也算不出来。填法：按上三角顺序写，分号分行。—— 3 个维度填 0.45,0.30;0.35（意思是 维1↔维2 为 0.45、维1↔维3 为 0.30、维2↔维3 为 0.35）；4 个维度填 0.45,0.30,0.35;0.40,0.25;0.50。留空 = 各维度互不相关。一般填 0.3~0.5，别超过 0.8"></i>
+            </span>
+            <span class="dim-field">
+                <input type="text" id="validityCorrelation" class="form-control"
+                       placeholder="3 维：0.45,0.30;0.35　4 维：0.45,0.30,0.35;0.40,0.25;0.50（留空 = 互不相关）">
+                <span id="validityCorrHint" class="validity-hint" role="status"></span>
+            </span>
+        </div>
+        <div id="validitySingleGroup" class="setting-row setting-row--block is-hidden">
+            <span class="field-inline dim-label">
+                <label class="mono-label" for="validitySingleQuestions">单选量表题号</label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="问卷星里很多量表不是用「量表题」做的，而是用「单选题」：一道题五个选项，从 1（非常不同意）到 5（非常同意）。这类题程序默认当普通单选题随机填，不会参与信效度优化。如果你想让它们也参与，就在这里把题号填出来（例：22-28，也可以写 22+23+24）。只填选项是打分式的单选题，普通选择题（如性别、城市）不要填。"></i>
+            </span>
+            <span class="dim-field">
+                <input type="text" id="validitySingleQuestions" class="form-control"
+                       placeholder="把「用单选题做的打分量表」题号填这里，例：22-28">
+                <span id="validitySingleHint" class="validity-hint" role="status"></span>
+            </span>
+        </div>
+        <div id="validityReverseGroup" class="setting-row setting-row--block is-hidden">
+            <span class="field-inline dim-label">
+                <label class="mono-label" for="validityReverse">反向计分题号</label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="有些题是「反着问」的（别处问「我很满意」，它问「我不太满意」）。这类题选同样的选项，代表的意思正好相反。填进这里后，程序会自动把答案翻转过来（5 点量表选 1 记为 5、选 2 记为 4），效果和 SPSS 里勾「反向计分」完全一样。例：25+30。没有反向题就留空。"></i>
+            </span>
+            <span class="dim-field">
+                <input type="text" id="validityReverse" class="form-control"
+                       placeholder="例：25+30（留空 = 全部按正向计分）">
+            </span>
+        </div>
+
+        <!-- 合成答卷（按统计目标反推每一份） -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="synthSwitch" class="form-check-input">
+                <label class="form-check-label" for="synthSwitch">合成答卷</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="信效度优化只保证「题目之间」一致；合成答卷再往前一步：让题目和因变量之间也按你指定的强度相关，所以拿去做二元 logistic 回归能跑出显著的系数。做法是整批生成 200 份后统一算 α、KMO 和显著项个数，不达标就换种子整批重来，满意了才开始提交。需要先填「因变量题号」和「记为 1 的选项」。"></i>
+            <span id="synthGroup" class="grow is-hidden">
+                <span class="field-inline">
+                    <span class="mono-label">目标显著项</span>
+                    <input type="number" id="synthSigLo" class="form-control" min="0" max="30" value="2"
+                           style="width:64px" aria-label="显著项下限">
+                    <span class="mono-label">~</span>
+                    <input type="number" id="synthSigHi" class="form-control" min="1" max="30" value="4"
+                           style="width:64px" aria-label="显著项上限">
+                    <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                       data-tip="希望回归结果里有几个变量显著。程序会整批校验，落在区间内才提交。8 个自变量建议填 2~4：真数据里全部显著的模型反而不可信，留几个不显著的才像真的。"></i>
+                </span>
+            </span>
+        </div>
+        <div id="synthOutcomeGroup" class="setting-row setting-row--block is-hidden">
+            <span class="field-inline dim-label">
+                <label class="mono-label" for="synthOutcomeQ">因变量</label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="拿哪道题当回归的 Y。必须是单选题。例：21。">
+                </i>
+            </span>
+            <span class="dim-field">
+                <input type="number" id="synthOutcomeQ" class="form-control" min="1" max="500"
+                       style="width:88px" placeholder="题号">
+                <input type="text" id="synthPositive" class="form-control" style="max-width:260px"
+                       placeholder="记为 1 的选项，从 0 开始，多个用逗号">
+                <span id="synthOutcomeHint" class="validity-hint" role="status"></span>
+            </span>
+        </div>
+        <div id="synthPredictorGroup" class="setting-row setting-row--block is-hidden">
+            <span class="field-inline dim-label">
+                <label class="mono-label" for="synthPredictors">自变量</label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="进回归的自变量题号，逗号分隔。量表题和人口学单选题都可以放。例：6,9,11,13,14,23,25,26。留空 = 自动用全部量表题 + 全部单选题（题太多时不好收敛，建议控制在 15 个以内）。"></i>
+            </span>
+            <span class="dim-field">
+                <input type="text" id="synthPredictors" class="form-control"
+                       placeholder="例：6,9,11,13,14,23,25,26（留空 = 自动推断）">
+                <span id="synthPredictorHint" class="validity-hint" role="status"></span>
+            </span>
+        </div>
+        <div id="synthEffectGroup" class="setting-row setting-row--block is-hidden">
+            <span class="field-inline dim-label">
+                <label class="mono-label" for="synthEffects">效应强度</label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="给哪些变量「设定」真实效应，写法：题号:系数，逗号分隔。例：23:0.30, 25:0.58, 26:0.70, 11:0.38。系数是 logit 尺度，正数表示提高 Y=1 的概率；经验值：量表题 0.55~0.70、5 级人口学变量 0.35~0.40 大约对应 p<0.01，小于 0.15 基本不显著。没写到的变量按 0 处理。注意：同一维度的题高度相关，系数会被放大 1.5~2 倍，别一味往大了堆。"></i>
+            </span>
+            <span class="dim-field">
+                <input type="text" id="synthEffects" class="form-control"
+                       placeholder="例：23:0.30, 25:0.58, 26:0.70, 11:0.38">
+                <span id="synthEffectHint" class="validity-hint" role="status"></span>
             </span>
         </div>
     </div>
@@ -248,7 +452,10 @@
             <p>把这个链接粘贴到「ip代理」输入框，脚本每次填问卷前都会访问它拿到一个新 IP。</p>
             <p>下面以 <strong>51 代理</strong>为例（没有广告，用这个是因为注册会送 20 元体验金，差不多可以刷几万份问卷）：</p>
 
-            <h6>1. 打开 51 代理网址：https://www.51daili.com/ 然后点击免费注册</h6>
+            <h6>1. 打开 51 代理网址：<a class="proxy-reg-link"
+                    href="https://www.51daili.com/index/user/promotion/parent_id/29121/code/MFD8ec8n.html"
+                    target="_blank" rel="noopener noreferrer">https://www.51daili.com/index/user/promotion/parent_id/29121/code/MFD8ec8n.html</a>
+                然后点击免费注册</h6>
             <img class="tutorial-img" src="static/pictures/test/1.png"
                  alt="51代理官网免费注册" onclick="openImageViewer(this.src)" loading="lazy">
 
@@ -268,7 +475,7 @@
             <img class="tutorial-img" src="static/pictures/test/5.png"
                  alt="API提取" onclick="openImageViewer(this.src)" loading="lazy">
 
-            <h6>6. 套餐选送的20积分，提取数量1，使用时长统一3分钟，选择地区这里看你想要问卷是哪个地区给你填，你就选哪里，其余按我选的来就行，再点击生成API链接</h6>
+            <h6>6. 套餐选送的20积分，提取数量1，你单份问卷需要多长时间这里就选几分钟，这里推荐选5分钟，选择地区这里看你想要问卷是哪个地区给你填，你就选哪里，其余按我选的来就行，再点击生成API链接</h6>
             <img class="tutorial-img" src="static/pictures/test/6.png"
                  alt="生成API链接" onclick="openImageViewer(this.src)" loading="lazy">
 

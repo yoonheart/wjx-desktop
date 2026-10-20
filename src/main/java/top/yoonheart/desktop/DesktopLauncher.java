@@ -8,6 +8,8 @@ import org.cef.CefApp;
 import org.cef.CefClient;
 import org.cef.CefSettings;
 import org.cef.browser.CefBrowser;
+import org.cef.browser.CefFrame;
+import org.cef.handler.CefLifeSpanHandlerAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
@@ -119,12 +121,33 @@ public final class DesktopLauncher {
         settings.cache_path = new File(resolveAppDir(), "jcef/cache").getAbsolutePath();
         settings.log_severity = CefSettings.LogSeverity.LOGSEVERITY_WARNING;
 
+        // 彻底禁用 Chromium 的 HTTP 缓存。
+        // 否则内嵌浏览器会把 /static/js/*.js 缓存到磁盘，换了新 jar 之后界面仍是旧版
+        // （表现为「代码明明改了、软件却还是老样子」）。前端页面就在本机 8080，
+        // 禁用缓存对性能没有实际影响，却能避免这类陈旧资源问题。
+        // 注：jcefmaven 的 CefAppBuilder 没有 addSwitch()，附加命令行开关走 addJcefArgs()。
+        builder.addJcefArgs("--disable-http-cache");
+
         return builder.build();
     }
 
     /** 创建并显示桌面窗口（EDT 执行） */
     private static void createWindow(CefApp cefApp, ConfigurableApplicationContext context) {
         CefClient client = cefApp.createClient();
+
+        // 所有 target="_blank" 的外部链接（教程里的「51 代理」、首页的 GitHub 等）
+        // 一律交给系统默认浏览器打开。JCEF 默认会尝试在软件内部再开一个窗口，
+        // 结果是「点了没反应」或把软件窗口导航走；这里统一拦下来，
+        // 软件窗口永远停在本地页面上。
+        client.addLifeSpanHandler(new CefLifeSpanHandlerAdapter() {
+            @Override
+            public boolean onBeforePopup(CefBrowser browser, CefFrame frame,
+                                        String targetUrl, String targetFrameName) {
+                openExternal(targetUrl);
+                return true; // 取消软件内部的弹窗
+            }
+        });
+
         CefBrowser browser = client.createBrowser("http://localhost:" + SERVER_PORT + "/", false, false);
 
         JFrame frame = new JFrame("问卷星助手");
@@ -246,12 +269,31 @@ public final class DesktopLauncher {
         return new File(dir).getAbsoluteFile();
     }
 
+    /** 用系统默认浏览器打开一个外部链接；仅接受 http/https，成功返回 true */
+    private static boolean openExternal(String url) {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        String target = url.trim();
+        String lower = target.toLowerCase();
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            log.warn("拒绝用系统浏览器打开非 http(s) 链接：{}", target);
+            return false;
+        }
+        try {
+            Desktop.getDesktop().browse(java.net.URI.create(target));
+            return true;
+        } catch (Exception e) {
+            log.warn("调用系统浏览器打开链接失败：{}", target, e);
+            return false;
+        }
+    }
+
     /** JCEF 不可用时，退回用系统浏览器打开（保证可用性） */
     private static void openInSystemBrowser() {
-        try {
-            Desktop.getDesktop().browse(java.net.URI.create("http://localhost:" + SERVER_PORT + "/"));
-        } catch (Exception ex) {
-            log.warn("打开系统浏览器失败，请手动访问 http://localhost:{}", SERVER_PORT);
+        String home = "http://localhost:" + SERVER_PORT + "/";
+        if (!openExternal(home)) {
+            log.warn("打开系统浏览器失败，请手动访问 {}", home);
         }
     }
 

@@ -1,6 +1,15 @@
 server:
   port: 8080
 
+spring:
+  web:
+    resources:
+      cache:
+        # 桌面版用 JCEF 内嵌 Chromium 打开本地页面，默认静态资源会被浏览器启发式缓存到磁盘，
+        # 换新 jar 后界面可能仍是旧版。这里全局禁用静态资源缓存，保证每次启动都取最新前端。
+        cachecontrol:
+          no-store: true
+
 logging:
   level:
     root: INFO

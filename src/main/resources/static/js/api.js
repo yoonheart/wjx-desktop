@@ -33,6 +33,18 @@ const wjxApi = {
     }
 };
 
+// 问卷配置导入 / 导出（桌面端：后端弹原生文件对话框并读写文件）
+const configApi = {
+    // 导出：{ suggestedName, data } → 用户选位置后写盘，返回 { path }
+    exportConfig(payload) {
+        return requestUtil.post('/api/config/export', payload);
+    },
+    // 导入：弹出文件选择框，返回文件里的 JSON
+    importConfig() {
+        return requestUtil.post('/api/config/import');
+    }
+};
+
 // 其他API模块可以在这里继续添加
 // const userApi = {
 //     // 用户相关API
@@ -40,7 +52,8 @@ const wjxApi = {
 
 // 将API模块挂载到window对象上，以便普通脚本访问
 window.api = {
-    wjx: wjxApi
+    wjx: wjxApi,
+    config: configApi
     // 其他API模块可以在这里继续添加
     // user: userApi
 };

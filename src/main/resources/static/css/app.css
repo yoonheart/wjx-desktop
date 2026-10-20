@@ -864,11 +864,27 @@ input[type="number"]::-webkit-inner-spin-button {
 .modal-footer {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     gap: var(--s2);
     margin-top: var(--s5);
     /* 同上：覆盖 Bootstrap 的 padding 与 border-top 分隔线 */
     padding: 0;
     border-top: 0;
+}
+
+/* 弹窗底部左侧的开关组（如「答案唯一」），靠 margin-right:auto 顶到左边，
+   这样其它只有一个右对齐按钮组的弹窗不受影响 */
+.modal-footer-left {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-right: auto;
+}
+
+.modal-footer-right {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
 }
 
 /* 确认对话框的参数摘要 */
@@ -961,6 +977,19 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .answer-text { flex: 2; min-width: 0; }
 
+/* 文本答案行的「概率 + %」分组；开启「答案唯一」时整组隐藏 */
+.answer-prob-group {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    flex: none;
+}
+
+.answer-prob-group .probability-input { width: 80px; }
+
+/* 「答案唯一」开启后：该空每份问卷只取一条答案，概率不再需要设置 */
+#textAnswerModal.is-unique .answer-prob-group { display: none; }
+
 /* ============ 设置行 ============ */
 
 .setting-row {
@@ -983,17 +1012,170 @@ input[type="number"]::-webkit-inner-spin-button {
     height: 18px;
     font-size: 13px;
     color: var(--ink-3);
-    cursor: help;
+    cursor: pointer;
     transition-property: color;
     transition-duration: var(--dur);
     transition-timing-function: var(--ease);
 }
 
 .help-icon:hover { color: var(--signal); }
+.help-icon.is-active { color: var(--signal); }
+
+/* 点击问号弹出的浮动说明（全局唯一节点，定位在问号下方） */
+.help-tip {
+    position: fixed;
+    z-index: 3000;
+    max-width: 320px;
+    padding: var(--s3) var(--s3);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-2);
+    box-shadow: var(--sh-3);
+    text-wrap: pretty;
+    opacity: 0;
+    visibility: hidden;
+    transition-property: opacity;
+    transition-duration: var(--dur);
+    transition-timing-function: var(--ease);
+}
+
+.help-tip.is-open { opacity: 1; visibility: visible; }
 
 .setting-row .form-control { min-height: 36px; font-size: 12.5px; }
 .setting-row .time-input { width: 76px; text-align: center; font-family: var(--font-mono); }
 .setting-row .api-input { font-size: 12px; }
+
+/* 不带开关的设置项标签（与 .form-check-label 视觉一致） */
+.setting-label {
+    flex: none;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    user-select: none;
+}
+
+/* 倍速：分段按钮组 */
+.seg-group {
+    display: inline-flex;
+    gap: 4px;
+}
+
+.seg-btn {
+    border-radius: 8px;
+    padding: 6px 14px;
+    color: var(--ink-2);
+}
+
+.seg-btn.is-active {
+    color: var(--signal-ink);
+    background: var(--signal-wash);
+    border-color: var(--signal);
+}
+
+/* 提交来源比例：三组滑块 + 数字框 */
+.source-ratio {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    padding: var(--s3) 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.source-item {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+}
+
+.source-label {
+    flex: none;
+    width: 62px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+}
+
+.source-range {
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    accent-color: var(--ink);
+}
+
+.source-value {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.source-input {
+    width: 62px;
+    text-align: center;
+    font-family: var(--font-mono);
+}
+
+#sourceRatioTotal.is-error {
+    color: var(--danger);
+}
+
+/* 独占一行的设置项（标签在上，输入框占满） */
+.setting-row--block {
+    align-items: flex-start;
+    gap: var(--s2);
+}
+
+.setting-row--block .mono-label {
+    flex: none;
+    padding-top: 9px;
+}
+
+.setting-row--block .form-control {
+    flex: 1;
+    min-width: 0;
+    font-size: 12.5px;
+}
+
+.select-sm {
+    width: auto;
+    min-width: 118px;
+    font-size: 12.5px;
+}
+
+/* ============ 信效度：维度分组 ============ */
+
+.dim-label {
+    flex: none;
+    align-items: flex-start;
+    padding-top: 9px;
+}
+
+.dim-label .mono-label { padding-top: 0; }
+
+.dim-field {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.setting-row--block .dim-field .form-control { flex: none; }
+
+.validity-hint {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--ink-3);
+}
+
+.validity-hint.is-ok { color: var(--ok); }
+.validity-hint.is-warn { color: var(--signal); }
+.validity-hint.is-error { color: var(--danger); }
 
 /* 设置行里两个可折叠的分组：默认横排，收起时由 .is-hidden 覆盖 */
 #apiUrlGroup,
@@ -1013,8 +1195,10 @@ input[type="number"]::-webkit-inner-spin-button {
     position: fixed;
     top: var(--s5);
     right: var(--s5);
-    /* 低于 .modal(1000)：弹窗打开时提示落在遮罩之下，而不是盖在弹窗上面 */
-    z-index: 900;
+    /* 高于 .modal(1000)：导入/导出这类操作是在「功能详细设置」面板打开时触发的，
+       提示如果压在遮罩下面，用户看到的就是「点了没反应」——提示已经被弹窗盖住了。
+       消息提示本来就该盖住一切，代价是可能遮住弹窗一角，可以手动关掉。 */
+    z-index: 2000;
     display: flex;
     flex-direction: column;
     gap: var(--s2);
@@ -1248,8 +1432,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 /* 首页输入行：默认收窄，激活后伸长。
-   激活态同时挂 :focus-within 与 JS 的 .is-active —— 后者覆盖个别浏览器
-   （以及无头截图环境）不派发 :focus 的情况 */
+   激活态由 JS 的 .is-active 与 CSS 的 :has(.form-control:focus) 双保险 ——
+   只认输入框焦点，「开始解析」按钮拿到焦点不算 */
 .hero--home .url-row {
     width: 300px;
     max-width: 100%;
@@ -1259,7 +1443,9 @@ input[type="number"]::-webkit-inner-spin-button {
     transition-timing-function: var(--ease);
 }
 
-.hero--home .url-row:focus-within,
+/* 只认输入框自身的焦点：点「开始解析」按钮后焦点落在按钮上，
+   旧写法 :focus-within 会把按钮焦点也算进去，导致有内容时整行永远收不回去 */
+.hero--home .url-row:has(.form-control:focus),
 .hero--home .url-row.is-active {
     width: 660px;
 }
@@ -1311,7 +1497,7 @@ input[type="number"]::-webkit-inner-spin-button {
     transition-timing-function: var(--ease);
 }
 
-.hero--home .url-row:focus-within .btn,
+.hero--home .url-row:has(.form-control:focus) .btn,
 .hero--home .url-row.is-active .btn {
     width: 152px;
     letter-spacing: .06em;
@@ -1491,7 +1677,7 @@ input[type="number"]::-webkit-inner-spin-button {
     .url-row { flex-direction: column; }
     .url-row .btn,
     .hero--home .url-row .btn,
-    .hero--home .url-row:focus-within .btn,
+    .hero--home .url-row:has(.form-control:focus) .btn,
     .hero--home .url-row.is-active .btn { width: 100%; }
     .hero { padding: var(--s8) 0; gap: var(--s5); }
 }
@@ -1820,6 +2006,18 @@ input[type="number"]::-webkit-inner-spin-button {
     border-radius: var(--r-1);
     margin: var(--s2) 0;
     display: inline-block;
+}
+
+/* 「51 代理」注册链接：完整网址可见、可点、可复制；长链接自动折行不撑破弹窗 */
+.proxy-reg-link {
+    color: var(--signal);
+    word-break: break-all;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.proxy-reg-link:hover {
+    color: var(--signal-ink);
 }
 
 .proxy-steps {

@@ -5,10 +5,14 @@ import org.slf4j.LoggerFactory;
 import top.yoonheart.util.LogSanitizer;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -222,6 +226,7 @@ public final class PythonExecutor {
     public static String executePythonScript(long timeoutSeconds, String scriptPath,
                                              Consumer<Process> processConsumer, String... args) {
         File tempConfigFile = null;
+        Writer logWriter = null;
         try {
             List<String> command = new ArrayList<>();
             command.add(resolvePythonCommand());
@@ -262,8 +267,12 @@ public final class PythonExecutor {
             StringBuilder output = new StringBuilder();
             StringBuilder errorOutput = new StringBuilder();
 
-            Thread outputThread = drainAsync(process.getInputStream(), output);
-            Thread errorThread = drainAsync(process.getErrorStream(), errorOutput);
+            // 刷题任务的脚本输出（谁提交成功、谁被拒、用的哪条 IP）全部落盘一份，
+            // 便于事后核对「前端显示几份 / 问卷星后台几份」。解析任务不落盘，避免刷屏。
+            logWriter = openTaskLog(args);
+
+            Thread outputThread = drainAsync(process.getInputStream(), output, logWriter);
+            Thread errorThread = drainAsync(process.getErrorStream(), errorOutput, logWriter);
 
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 destroyProcessTree(process);
@@ -272,6 +281,8 @@ public final class PythonExecutor {
 
             outputThread.join();
             errorThread.join();
+
+            closeQuietly(logWriter);
 
             int exitCode = process.exitValue();
             if (exitCode != 0) {
@@ -290,9 +301,70 @@ public final class PythonExecutor {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("执行Python脚本被中断", e);
         } finally {
+            closeQuietly(logWriter);
             if (tempConfigFile != null && tempConfigFile.exists() && !tempConfigFile.delete()) {
                 log.warn("临时配置文件删除失败: {}", tempConfigFile.getAbsolutePath());
             }
+        }
+    }
+
+    /**
+     * 为刷题任务打开一份输出日志文件。
+     *
+     * <p>脚本会打印每份问卷的提交判定（成功 / 被拒 / 无法确认）与所用代理 IP，
+     * 这些内容以前只留在内存里、任务结束即丢弃，导致「前端几份 vs 后台几份」无从核对。
+     * 这里边读边写到 {@code ${wjx.app.dir}/logs/brush-yyyyMMdd-HHmmss.log}。</p>
+     *
+     * <p>只有带 {@code progress_file} 的配置（即刷题任务）才落盘；解析等一次性调用不写文件。
+     * 写日志失败绝不影响任务本身，一律降级为不记录。</p>
+     */
+    private static Writer openTaskLog(String... args) {
+        try {
+            if (args.length == 0 || args[0] == null || !args[0].contains("\"progress_file\"")) {
+                return null;
+            }
+            File dir = new File(resolveAppDir(), "logs");
+            if (!dir.exists() && !dir.mkdirs()) {
+                dir = new File(System.getProperty("java.io.tmpdir"), "wjx-logs");
+                if (!dir.exists() && !dir.mkdirs()) {
+                    return null;
+                }
+            }
+            String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(new java.util.Date());
+            File file = new File(dir, "brush-" + stamp + ".log");
+            Writer writer = new BufferedWriter(new OutputStreamWriter(
+                    new FileOutputStream(file, true), StandardCharsets.UTF_8));
+            writer.write("===== 任务开始 " + new java.util.Date() + " =====\n");
+            writer.flush();
+            log.info("任务日志: {}", file.getAbsolutePath());
+            return writer;
+        } catch (Exception e) {
+            log.warn("创建任务日志失败，本次不记录脚本输出", e);
+            return null;
+        }
+    }
+
+    /** 软件目录：优先系统属性，其次环境变量，最后 ~/.wjx */
+    private static File resolveAppDir() {
+        String dir = System.getProperty("wjx.app.dir");
+        if (dir == null || dir.isBlank()) {
+            dir = System.getenv("WJX_APP_DIR");
+        }
+        if (dir == null || dir.isBlank()) {
+            dir = System.getProperty("user.home") + File.separator + ".wjx";
+        }
+        return new File(dir).getAbsoluteFile();
+    }
+
+    private static void closeQuietly(Writer writer) {
+        if (writer == null) {
+            return;
+        }
+        try {
+            writer.flush();
+            writer.close();
+        } catch (IOException ignored) {
+            // 关闭日志失败不影响任务结果
         }
     }
 
@@ -321,14 +393,25 @@ public final class PythonExecutor {
         }
     }
 
-    /** 异步读取某个流，避免子进程因缓冲区写满而阻塞 */
-    private static Thread drainAsync(InputStream stream, StringBuilder sink) {
+    /** 异步读取某个流，避免子进程因缓冲区写满而阻塞；同时把每一行追加到任务日志 */
+    private static Thread drainAsync(InputStream stream, StringBuilder sink, Writer logWriter) {
         Thread thread = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(stream, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     sink.append(line).append('\n');
+                    if (logWriter != null) {
+                        synchronized (logWriter) {
+                            try {
+                                logWriter.write(line);
+                                logWriter.write(System.lineSeparator());
+                                logWriter.flush();
+                            } catch (IOException ignored) {
+                                // 日志写失败（磁盘满 / 权限）不能让刷题任务失败
+                            }
+                        }
+                    }
                 }
             } catch (IOException e) {
                 log.debug("读取子进程输出失败", e);
