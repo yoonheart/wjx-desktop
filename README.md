@@ -1,4 +1,4 @@
-<img width="1949" height="958" alt="image" src="https://github.com/user-attachments/assets/d7f7b5e9-74ba-4b7a-a904-6e7b7fd1b61a" /># 问卷星助手（wjx-desktop）目前只支持Windows
+# 问卷星助手（wjx-desktop）目前只支持Windows
 
 > **1.0 Windows 桌面版 / Windows release**：把问卷星自动填写做成了开箱即用的桌面软件 ——
 > **双击就能用，新机零环境依赖**，想体验基础版效果可去--->www.yoonheart.me
