@@ -4,8 +4,9 @@
 > 相见就是缘分，喜欢的话可以点一个star~，非常感谢！！！
 > 想体验基础版效果可去--->www.yoonheart.me
 
-[下载 Windows 桌面版 / Download](../../releases/latest) · [问题反馈 / Issues](../../issues)
-如果下载速度太慢，可通过百度网盘下载：https://pan.baidu.com/s/1OscMODZpNpftK1f9X3KoyQ?pwd=rnwx
+> [下载 Windows 桌面版 / Download](../../releases/latest) · [问题反馈 / Issues](../../issues)<br>
+
+> 如果下载速度太慢，可通过百度网盘下载：https://pan.baidu.com/s/1OscMODZpNpftK1f9X3KoyQ?pwd=rnwx
 
 > **作者 Author：YoonHeart**
 >
