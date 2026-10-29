@@ -1,9 +1,11 @@
 # 问卷星助手（wjx-desktop）目前只支持Windows
 
 > **1.0 Windows 桌面版**：把问卷星自动填写做成了开箱即用的桌面软件 ——
-> **双击就能用，新机零环境依赖**，想体验基础版效果可去--->www.yoonheart.me
-> 只要电脑上装有 Edge 浏览器就可以使用。
+> **双击就能用，新机零环境依赖**只要电脑上装有 Edge 浏览器就可以使用。
 > 相见就是缘分，喜欢的话可以点一个star~，非常感谢！！！
+> 想体验基础版效果可去--->www.yoonheart.me
+
+[下载 Windows 桌面版 / Download](../../releases/latest) · [问题反馈 / Issues](../../issues)
 
 > **作者 Author：YoonHeart**
 >
@@ -14,8 +16,6 @@
 ![Java](https://img.shields.io/badge/Java-17-e95f6d)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB)
 ![License](https://img.shields.io/badge/License-Non--Commercial-e95f6d)
-
-[下载 Windows 桌面版 / Download](../../releases/latest) · [问题反馈 / Issues](../../issues)
 
 ![首页：粘贴问卷链接，点击开始解析](docs/screenshots/home.png)
 
