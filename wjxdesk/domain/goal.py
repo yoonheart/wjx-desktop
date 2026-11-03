@@ -1,0 +1,185 @@
+"""数据目标：把「信效度」和「合成答卷」合成一个用户能理解的概念。
+
+三块内容，全部可选：
+- 信度：目标 α（逐维度保证）
+- 效度：目标 KMO（维度间相关可达）
+- 结论：结局题 + 影响因素 + 期望方向（按目标显著性构造）
+
+设计要点：不做「随机生成 + 不达标重抽」，而是按目标**解析反推**参数：
+α 与「载荷/误差」比值有闭式关系，显著性由「相关系数临界值」决定，
+所以能稳定达标，而不是碰运气。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Mapping
+
+
+def _parse_groups(spec: Any) -> tuple[tuple[int, ...], ...]:
+    """把维度分组解析成「题号元组的元组」。
+
+    支持多种写法，随便一种都能懂：
+      "1-3;4-6"      → ((1,2,3),(4,6,...))
+      [[1,2,3],[4,5]]→ 原样
+      ""             → 空（表示自动：所有量表题一个维度）
+    """
+    if not spec:
+        return ()
+    if isinstance(spec, (list, tuple)):
+        groups: list[tuple[int, ...]] = []
+        for group in spec:
+            if isinstance(group, (list, tuple)):
+                groups.append(tuple(int(x) for x in group))
+            elif isinstance(group, str):
+                groups.append(tuple(_parse_numbers(group)))
+        return tuple(g for g in groups if g)
+
+    text = str(spec)
+    groups = []
+    for chunk in text.replace("|", ";").replace("，", ";").split(";"):
+        numbers = tuple(_parse_numbers(chunk))
+        if numbers:
+            groups.append(numbers)
+    return tuple(groups)
+
+
+def _parse_numbers(spec: str) -> list[int]:
+    import re
+
+    text = (spec or "").strip()
+    if not text:
+        return []
+    found: list[int] = []
+    for chunk in re.split(r"[,\s+、]+", text):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            head, _, tail = chunk.partition("-")
+            if head.strip().isdigit() and tail.strip().isdigit():
+                start, end = int(head), int(tail)
+                if start > end:
+                    start, end = end, start
+                found.extend(range(start, end + 1))
+                continue
+        if chunk.strip().isdigit():
+            found.append(int(chunk))
+    return found
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchGoal:
+    """用户想要的数据长什么样。"""
+
+    enabled: bool = False
+
+    # -- 信度 --
+    alpha_target: float = 0.85
+    dimensions: tuple[tuple[int, ...], ...] = ()
+    reverse: tuple[int, ...] = ()
+    # 维度间相关：0=独立维度，0.6=强相关（影响 KMO）
+    dimension_correlation: float = 0.45
+
+    # -- 效度 --
+    kmo_target: float = 0.70
+
+    # -- 结论 --
+    outcome_question: int = 0
+    positive_options: tuple[int, ...] = ()
+    outcome_label: str = ""
+    predictors: tuple[int, ...] = ()
+    # 题号 → "+" 正向 / "-" 负向 / "0" 不显著
+    directions: Mapping[int, str] = field(default_factory=dict)
+    # 至少几个自变量要显著
+    significant_required: int = 0
+    # 结局事件的占比（如"满意"占 50%）
+    event_rate: float = 0.5
+
+    # -- 求解 --
+    attempts: int = 20
+
+    def dimension_of(self, number: int) -> int:
+        for index, group in enumerate(self.dimensions):
+            if number in group:
+                return index
+        return 0
+
+    @property
+    def dimension_count(self) -> int:
+        return max(1, len(self.dimensions))
+
+    @property
+    def wants_reliability(self) -> bool:
+        return bool(self.enabled)
+
+    @property
+    def wants_conclusion(self) -> bool:
+        return bool(self.enabled and self.outcome_question > 0 and self.predictors)
+
+    def validate(self) -> None:
+        if not self.enabled:
+            return
+        if not 0.0 < self.alpha_target <= 1.0:
+            raise ValueError("目标 α 需要在 (0,1] 之间")
+        if not 0.0 < self.kmo_target <= 1.0:
+            raise ValueError("目标 KMO 需要在 (0,1] 之间")
+        if self.wants_conclusion and not self.positive_options:
+            raise ValueError("指定了结局题，但没选「算作正面」的选项")
+        if not 0.0 < self.event_rate < 1.0:
+            raise ValueError("事件占比需要在 0 和 1 之间")
+
+    def direction_of(self, number: int) -> str:
+        return str(self.directions.get(number, "+"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "alpha_target": self.alpha_target,
+            "dimensions": [list(g) for g in self.dimensions],
+            "reverse": list(self.reverse),
+            "dimension_correlation": self.dimension_correlation,
+            "kmo_target": self.kmo_target,
+            "outcome_question": self.outcome_question,
+            "positive_options": list(self.positive_options),
+            "outcome_label": self.outcome_label,
+            "predictors": list(self.predictors),
+            "directions": dict(self.directions),
+            "significant_required": self.significant_required,
+            "event_rate": self.event_rate,
+            "attempts": self.attempts,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "ResearchGoal":
+        if not isinstance(raw, Mapping):
+            return cls()
+
+        directions: dict[int, str] = {}
+        for key, value in (raw.get("directions") or {}).items():
+            try:
+                directions[int(key)] = str(value)
+            except (TypeError, ValueError):
+                continue
+
+        goal = cls(
+            enabled=bool(raw.get("enabled", False)),
+            alpha_target=float(raw.get("alpha_target", 0.85)),
+            dimensions=_parse_groups(raw.get("dimensions")),
+            reverse=tuple(int(x) for x in (raw.get("reverse") or ()) if str(x).isdigit()),
+            dimension_correlation=float(raw.get("dimension_correlation", 0.45)),
+            kmo_target=float(raw.get("kmo_target", 0.70)),
+            outcome_question=int(raw.get("outcome_question") or 0),
+            positive_options=tuple(
+                int(x) for x in (raw.get("positive_options") or ()) if str(x).isdigit()
+            ),
+            outcome_label=str(raw.get("outcome_label") or ""),
+            predictors=tuple(
+                int(x) for x in (raw.get("predictors") or ()) if str(x).isdigit()
+            ),
+            directions=directions,
+            significant_required=int(raw.get("significant_required") or 0),
+            event_rate=float(raw.get("event_rate", 0.5)),
+            attempts=int(raw.get("attempts", 12)),
+        )
+        goal.validate()
+        return goal

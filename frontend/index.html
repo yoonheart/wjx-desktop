@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>问卷星助手</title>
+    <link rel="icon" href="/static/pictures/头像.jpg" type="image/jpeg">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="/static/css/app.css" rel="stylesheet">
+</head>
+<body>
+<div class="page">
+    <div class="top-rule"></div>
+
+    <main class="wrap wrap--narrow stage">
+        <div class="hero hero--home">
+
+            <h1 class="hero-title reveal reveal-1">
+                <span>问卷星</span><span class="hero-title-light">自动刷题系统</span>
+            </h1>
+
+            <form class="hero-form reveal reveal-2" onsubmit="return false;">
+                <div class="url-row">
+                    <div class="url-field">
+                        <input type="url" id="wjxUrl" class="form-control"
+                               placeholder="点击开始"
+                               data-placeholder-idle="点击开始"
+                               data-placeholder-active="请输入问卷链接 例：https://v.wjx.cn/vm/xxxxxx.aspx"
+                               autocomplete="off" spellcheck="false" required>
+                        <button type="button" class="url-clear is-hidden" id="urlClear"
+                                aria-label="清空输入" title="清空">&times;</button>
+                        <div class="url-history is-hidden" id="urlHistory">
+                            <div class="url-history-head">
+                                <span class="url-history-title">历史记录</span>
+                                <button type="button" class="url-history-clear" id="urlHistoryClear">清空</button>
+                            </div>
+                            <ul class="url-history-list" id="urlHistoryList"></ul>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="analyzeBtn">
+                        开始解析
+                    </button>
+                </div>
+                <span class="field-hint">仅接受 v.wjx.cn / www.wjx.cn 域名</span>
+            </form>
+
+            <!-- 驱动下载进度条（点击解析后若驱动缺失/版本不符时显示） -->
+            <div id="driverPanel" class="driver-panel reveal reveal-3 is-hidden">
+                <div class="driver-panel-text">正在下载必备插件（Edge 驱动）...</div>
+                <div class="driver-track">
+                    <div id="driverBar" class="driver-fill" role="progressbar"
+                         aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <div class="driver-panel-percent"><span id="driverPercent">0</span>%</div>
+            </div>
+
+            <!-- 开源信息：整条可点击，直达 GitHub 仓库 -->
+            <div class="oss-wrap reveal reveal-3">
+                <a class="oss"
+                   href="https://github.com/yoonheart/wjx-desktop"
+                   target="_blank" rel="noopener noreferrer"
+                   title="前往 GitHub 查看开源代码">
+                    <span class="oss-icon" aria-hidden="true"><i class="fa fa-github"></i></span>
+                    <span class="oss-text">
+                        <span class="oss-title">项目已开源</span>
+                        <span class="oss-repo">github.com/yoonheart/wjx-desktop</span>
+                    </span>
+                    <span class="oss-cta">
+                        <span class="oss-cta-label">喜欢可以点个 Star</span>
+                        <span class="oss-star" aria-hidden="true">⭐</span>
+                        <span class="oss-cta-thanks">~ 感谢</span>
+                    </span>
+                </a>
+            </div>
+
+            <div class="hero-foot reveal reveal-4">
+                <p class="disclaimer-free">本工具为免费工具</p>
+                <p class="disclaimer">
+                    本工具仅用于技术研究和学习，不得用于任何非法用途或商业活动。
+                    使用本工具产生的一切后果由使用者自行承担，与开发者无关。
+                </p>
+            </div>
+
+        </div>
+    </main>
+</div>
+
+<!-- 通用确认对话框（软件自带样式，替代浏览器原生 confirm） -->
+<div id="confirmModal" class="modal">
+    <div class="modal-content modal-content--confirm">
+        <div class="modal-title" id="confirmTitle">确认操作</div>
+        <div class="modal-body">
+            <dl class="confirm-list" id="confirmList"></dl>
+            <p class="confirm-note" id="confirmMessage"></p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn" id="confirmCancel">取消</button>
+            <button type="button" class="btn btn-primary" id="confirmOk">确认</button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/alert.js"></script>
+<script src="/static/js/request.js"></script>
+<script src="/static/js/api.js"></script>
+<script>
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const urlInput = document.getElementById('wjxUrl');
+
+    // 允许的问卷星域名（严格比较主机名，不做前缀匹配）
+    const ALLOWED_WJX_HOSTS = ['v.wjx.cn', 'www.wjx.cn'];
+
+    /**
+     * 校验是否为合法的问卷星链接。
+     * 用 URL 解析而不是 startsWith：后者会放过 https://v.wjx.cn.evil.com 这类前缀欺骗。
+     */
+    function isWjxUrl(value) {
+        try {
+            const parsed = new URL(value);
+            return parsed.protocol === 'https:'
+                && ALLOWED_WJX_HOSTS.includes(parsed.hostname.toLowerCase());
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // 回车直接触发解析
+    urlInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            analyzeBtn.click();
+        }
+    });
+
+    // 占位提示：默认「点击开始」，聚焦后换成示例链接；失焦且为空则换回
+    // 同时给输入行挂激活类，让行宽与按钮一起「长大」
+    const urlRow = urlInput.closest('.url-row');
+    let urlRowTimer = null;
+
+    urlInput.addEventListener('focus', function () {
+        clearTimeout(urlRowTimer);
+        urlRow.classList.add('is-active');
+        urlInput.placeholder = urlInput.dataset.placeholderActive;
+    });
+
+    urlInput.addEventListener('blur', function () {
+        // 延迟收起：等点击按钮的事件走完，避免按钮在位移中途丢点击
+        clearTimeout(urlRowTimer);
+        urlRowTimer = setTimeout(function () {
+            // 已经填了链接就保持展开 —— 缩回 300px 会把链接裁掉，用户看不到自己填的是什么
+            if (!urlInput.value.trim()) {
+                urlRow.classList.remove('is-active');
+                urlInput.placeholder = urlInput.dataset.placeholderIdle;
+            }
+        }, 200);
+    });
+
+    // 有内容就保持展开（粘贴、历史回填等不经过 focus 的路径也要覆盖）
+    urlInput.addEventListener('input', function () {
+        if (urlInput.value.trim()) urlRow.classList.add('is-active');
+    });
+
+    // 从浏览器缓存恢复出旧内容时（返回首页、刷新），也直接展开
+    if (urlInput.value.trim()) urlRow.classList.add('is-active');
+
+    analyzeBtn.addEventListener('click', function () {
+        const url = urlInput.value.trim();
+
+        // 必须是 https 且主机名为 v.wjx.cn / www.wjx.cn
+        if (!isWjxUrl(url)) {
+            showAlert('给我喂的什么链接，是不是给错了', 'error');
+            urlInput.focus();
+            return;
+        }
+
+        // 跳转到解析页前，先确保 Edge 驱动就绪（缺失/版本不符时下载到软件目录）
+        window.location.href = '/analysis?url=' + encodeURIComponent(url);
+    });
+
+    /**
+     * 检查 Edge 驱动：就绪则直接解析；否则显示进度条并下载。
+     * @param {string} url 问卷星链接
+     */
+    function ensureDriverThenAnalyze(url) {
+        // 协议级实现不需要驱动，直接进入解析页
+        window.location.href = '/analysis?url=' + encodeURIComponent(url);
+        return;
+    }
+
+    function legacyDriverFlow(url) {
+        const driverPanel = document.getElementById('driverPanel');
+
+        // 1. 先查询状态
+        api.wjx.driverStatus()
+            .then(data => {
+                const st = data.data || {};
+                // 已就绪，直接解析
+                if (st.ready) {
+                    window.location.href = '/analysis?url=' + encodeURIComponent(url);
+                    return;
+                }
+                // 未就绪：显示进度条并触发下载
+                showDriverPanel();
+                return api.wjx.driverDownload()
+                    .then(() => pollDriverProgress(url));
+            })
+            .catch(err => {
+                hideDriverPanel();
+                showAlert('驱动检查失败：' + err.message, 'error');
+            });
+    }
+
+    /** 轮询定时器句柄：跳转/页面恢复时必须清理，否则从解析页返回首页后
+     *  会因 bfcache 恢复旧状态而反复跳转，把用户困在「下载 100%」里 */
+    let driverPollTimer = null;
+
+    function showDriverPanel() {
+        const driverPanel = document.getElementById('driverPanel');
+        driverPanel.classList.remove('is-hidden');
+        analyzeBtn.disabled = true;
+    }
+
+    function hideDriverPanel() {
+        const driverPanel = document.getElementById('driverPanel');
+        driverPanel.classList.add('is-hidden');
+        analyzeBtn.disabled = false;
+    }
+
+    /** 把进度条 UI 归零（页面恢复/重新下载时用） */
+    function resetDriverPanel() {
+        const driverBar = document.getElementById('driverBar');
+        const driverPercent = document.getElementById('driverPercent');
+        if (driverBar) driverBar.style.width = '0%';
+        if (driverPercent) driverPercent.textContent = '0';
+    }
+
+    /**
+     * 轮询驱动下载进度，完成后跳转解析页。
+     */
+    function pollDriverProgress(url) {
+        const driverBar = document.getElementById('driverBar');
+        const driverPercent = document.getElementById('driverPercent');
+
+        // 防止重复起轮询
+        if (driverPollTimer) {
+            clearInterval(driverPollTimer);
+        }
+        driverPollTimer = setInterval(() => {
+            api.wjx.driverProgress()
+                .then(data => {
+                    const st = data.data || {};
+                    const pct = (st.progress >= 0) ? st.progress : 0;
+                    driverBar.style.width = pct + '%';
+                    driverPercent.textContent = pct;
+
+                    if (st.ready) {
+                        stopDriverPolling();
+                        driverBar.style.width = '100%';
+                        driverPercent.textContent = '100';
+                        setTimeout(() => {
+                            window.location.href = '/analysis?url=' + encodeURIComponent(url);
+                        }, 300);
+                    }
+                })
+                .catch(() => {
+                    // 单次轮询失败不中断，继续下一次
+                });
+        }, 500);
+    }
+
+    function stopDriverPolling() {
+        if (driverPollTimer) {
+            clearInterval(driverPollTimer);
+            driverPollTimer = null;
+        }
+    }
+
+    // 浏览器后退（bfcache 恢复）时，页面 DOM 状态原样保留：
+    // 进度条还挂在 100%、按钮仍禁用、旧的轮询定时器还活着（会导致反复跳转解析页）。
+    // 这里统一恢复到初始态，让用户能正常输入链接继续解析。
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) {
+            stopDriverPolling();
+            hideDriverPanel();
+            resetDriverPanel();
+        }
+    });
+
+    // 离开页面时也顺手停掉轮询，双保险
+    window.addEventListener('pagehide', stopDriverPolling);
+</script>
+<!-- 软件自带确认框（含桌面端关窗钩子）+ 网址历史记录下拉：
+     放在页面脚本之后加载，确认框实现会覆盖 analysis.js 内的旧版 -->
+<script src="/static/js/answers-csv.js"></script>
+    <script src="/static/js/goal-panel.js"></script>
+    <script src="/static/js/confirm.js"></script>
+<script src="/static/js/url-history.js"></script>
+</body>
+</html>

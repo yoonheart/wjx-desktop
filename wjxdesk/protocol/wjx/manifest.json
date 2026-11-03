@@ -1,0 +1,97 @@
+{
+  "platform": "wjx",
+  "revision": "2026-11-b",
+  "parse": {
+    "field_selector": "div.field",
+    "type_attr": "type",
+    "number_selector": "div.topicnumber",
+    "title_selector": "div.topichtml",
+    "title_fallback": "div.field-label",
+    "option_container": "div.ui-radio, div.ui-checkbox",
+    "option_label": "div.label",
+    "required_class": "req",
+    "matrix_table": "table.matrixtable",
+    "matrix_header_row": "tr",
+    "kind_map": {
+      "1": "blank",
+      "2": "blank",
+      "3": "single",
+      "4": "multi",
+      "5": "scale",
+      "6": "matrix",
+      "7": "dropdown",
+      "8": "slider",
+      "11": "rank"
+    }
+  },
+  "wire": {
+    "submit_path": "/joinnew/processjq.ashx",
+    "method": "POST",
+    "content_type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "body_field": "submitdata",
+    "scene_field": "sceneId",
+    "fixed_params": {
+      "submittype": "1",
+      "nw": "1",
+      "jwt": "4",
+      "jpm": "62",
+      "wxfs": "100"
+    },
+    "page_template": "https://v.wjx.cn/vm/{shortid}.aspx"
+  },
+  "blob": {
+    "item_sep": "}",
+    "option_sep": "|",
+    "blank_sep": "^",
+    "matrix_row_sep": "!",
+    "matrix_pair_sep": ",",
+    "skip_token": "-3",
+    "skip_token_text": "(跳过)",
+    "escape": {
+      "!": "！",
+      "^": "ˆ",
+      "$": "ξ",
+      "}": "｝",
+      "|": "¦",
+      "<": "＜"
+    },
+    "rank_sep": ","
+  },
+  "verdict": {
+    "success": [
+      "提交成功",
+      "感谢您的参与",
+      "答卷已提交",
+      "已完成"
+    ],
+    "need_verify": [
+      "请完成验证",
+      "验证码",
+      "滑动",
+      "人机",
+      "安全校验"
+    ],
+    "closed": [
+      "已停止",
+      "已暂停",
+      "未开放",
+      "已结束",
+      "问卷不存在"
+    ],
+    "limit": [
+      "次数",
+      "上限",
+      "已满",
+      "达到"
+    ]
+  },
+  "device_profiles": {
+    "pc": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+    "android": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "wechat": "Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.49.2600(0x2800313D) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64"
+  },
+  "source_tokens": [
+    "1"
+  ]
+}

@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>问卷解析结果</title>
+    <link rel="icon" href="/static/pictures/头像.jpg" type="image/jpeg">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="/static/css/app.css" rel="stylesheet">
+    <style>
+        /* 数据目标：窄屏（手机/窗口拉小）自动堆叠，避免挤压 */
+        @media (max-width: 720px) {
+            #goalBodyGroup,
+            #goalTargetGroup {
+                grid-template-columns: 1fr !important;
+                gap: 8px !important;
+            }
+            #goalFactors {
+                flex-direction: column;
+            }
+            #goalFactors label {
+                width: 100%;
+                flex-wrap: wrap;
+                white-space: normal !important;
+            }
+            #goalFactors select[data-dir] {
+                margin-left: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="top-rule"></div>
+
+    <header class="wrap appbar">
+        <button type="button" class="btn btn-sm" id="backBtn" onclick="confirmBack()">
+            <i class="fa fa-arrow-left" aria-hidden="true"></i> 返回首页
+        </button>
+        <span class="appbar-title">问卷解析结果</span>
+        <span class="appbar-meta">Yoonheart</span>
+    </header>
+
+    <main class="wrap stack">
+
+        <!-- 系统配置工具条 -->
+        <section class="system-config is-hidden">
+            <div class="toolbar">
+<div class="toolbar-field">
+                    <label for="targetCount" class="mono-label">目标份数</label>
+                    <input type="number" id="targetCount" class="form-control" min="1" max="1000" value="1">
+                    <span class="mono-label">份</span>
+                </div>
+                <button type="button" class="btn btn-sm" id="randomProbBtn">
+                    <i class="fa fa-random" aria-hidden="true"></i> 随机概率
+                </button>
+                <button type="button" class="btn btn-sm" id="detailSettingsBtn">
+                    <i class="fa fa-cog" aria-hidden="true"></i> 功能设置
+                </button>
+                <button type="button" class="btn btn-sm" id="usageIntroBtn">
+                    <i class="fa fa-book" aria-hidden="true"></i> 使用须知
+                </button>
+                <button type="button" class="btn btn-sm" id="quickStartBtn">
+                    <i class="fa fa-rocket" aria-hidden="true"></i> 快速上手
+                </button>
+            </div>
+        </section>
+
+        <!-- 解析结果区域 -->
+            <script>
+        // 解析卡住时，把真实错误显示出来，而不是一直转圈
+        (function () {
+            function show(message) {
+                var box = document.getElementById('analysisContent');
+                if (!box) {
+                    return;
+                }
+                if (!box.querySelector('.loading-spinner')) {
+                    return;
+                }
+                box.innerHTML = '<div class="state-msg is-error" style="padding:24px;line-height:1.9">'
+                    + '<div style="font-weight:600;margin-bottom:6px">页面出错了</div>'
+                    + '<div style="font-size:13px;color:#b02a37;word-break:break-all">'
+                    + String(message).replace(/</g, '&lt;') + '</div></div>';
+            }
+            window.addEventListener('error', function (event) {
+                show('脚本错误：' + (event.message || '')
+                    + '（' + (event.filename || '').split('/').pop() + ':' + (event.lineno || 0) + '）');
+            });
+            window.addEventListener('unhandledrejection', function (event) {
+                var reason = event.reason;
+                show('请求失败：' + ((reason && (reason.message || reason)) || '未知原因'));
+            });
+        })();
+    </script>
+        <div id="analysisContent">
+            <div class="loading-container">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">请耐心等待约十秒钟，正在解析问卷内容...</div>
+            </div>
+        </div>
+
+        <!-- 进度面板 -->
+        <section id="progressPanel" class="progress-panel is-hidden">
+            <div class="progress-head" id="progressTitle">
+                <i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 正在刷问卷
+            </div>
+
+            <div class="progress-track">
+                <div id="progressBar" class="progress-fill" role="progressbar"
+                     aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+
+            <div class="progress-stats">
+                <div>
+                    <div class="progress-stat-label">已完成</div>
+                    <div class="progress-stat-value"><span id="completedCount">0</span></div>
+                </div>
+                <div>
+                    <div class="progress-stat-label">目标</div>
+                    <div class="progress-stat-value"><span id="progressTargetCount">0</span></div>
+                </div>
+                <div>
+                    <div class="progress-stat-label">进度</div>
+                    <div class="progress-stat-value is-accent"><span id="percentDisplay">0</span>%</div>
+                </div>
+            </div>
+
+            <button type="button" id="stopButton" class="btn btn-danger">
+                <i class="fa fa-stop" aria-hidden="true"></i> 停止任务
+            </button>
+        </section>
+
+        <!-- 开刷按钮 -->
+        <button type="button" class="btn btn-success btn-block is-hidden" id="brushBtn">
+            准备就绪！开刷
+        </button>
+
+    </main>
+</div>
+
+<!-- 文本答案配置弹窗 -->
+<div id="textAnswerModal" class="modal">
+    <div class="modal-content">
+        <button type="button" class="close" aria-label="关闭">&times;</button>
+        <div class="modal-title">配置该题文本答案</div>
+        <p class="modal-note" id="textAnswerNote">总概率相加须得 100</p>
+
+        <div id="answerList">
+            <div class="answer-item">
+                <input type="text" id="answerText0" class="answer-text form-control"
+                       placeholder="输入文本答案" aria-label="文本答案">
+                <span class="answer-prob-group">
+                    <input type="number" id="answerProb0" class="probability-input form-control"
+                           placeholder="概率" aria-label="概率" min="0" max="100">
+                    <span class="mono-label">%</span>
+                </span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeAnswerItem(this)">删除</button>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <!-- 左下角：答案唯一切换（默认关闭）＋ 说明问号 -->
+            <div class="modal-footer-left">
+                <div class="form-check form-switch">
+                    <input type="checkbox" id="answerUniqueSwitch" class="form-check-input">
+                    <label class="form-check-label" for="answerUniqueSwitch">答案唯一</label>
+                </div>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="开启后，问卷对于该空的选择唯一，不会重复"></i>
+            </div>
+            <div class="modal-footer-right">
+                <button type="button" class="btn btn-sm" onclick="addAnswerItem()">添加答案</button>
+                <button type="button" class="btn btn-primary" onclick="saveTextAnswers()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 系统使用须知弹窗 -->
+<div id="usageIntroModal" class="modal">
+    <div class="modal-content modal-content--usage">
+        <button type="button" class="close" aria-label="关闭">&times;</button>
+        <div class="modal-title">系统使用须知</div>
+
+        <div class="modal-body">
+            <p>目前支持单选题、多选题、填空题、量表题、矩阵题、下拉框题，理论上支持排序题。</p>
+
+            <h6>单选题</h6>
+            <p>每道题需要设置 n 份问卷里每个选项出现的概率，各选项概率之和应为 100。
+                如果该选项需要填入文本，则点击「编辑文本答案」。</p>
+            <img src="static/pictures/单选.png" alt="单选题示例">
+            <img src="static/pictures/编辑文本答案.png" alt="编辑文本答案示例">
+            <p>然后手动输入这道题的回答，每个答案占一行；需要新增答案则点击「添加答案」，
+                所有答案概率之和应为 100。</p>
+
+            <h6>多选题</h6>
+            <img src="static/pictures/多选.png" alt="多选题示例">
+            <p>多选题同单选题。</p>
+
+            <h6>填空题</h6>
+            <img src="static/pictures/填空.png" alt="填空题示例">
+            <p>填空题类似于单选题，点击「编辑文本答案」即可。</p>
+
+            <h6>量表题</h6>
+            <img src="static/pictures/量表.png" alt="量表题示例">
+            <p>量表题同样是所有选项概率之和为 100。注意不要漏填，后面可能还有未展示的选项。</p>
+
+            <h6>矩阵题</h6>
+            <img src="static/pictures/矩阵.png" alt="矩阵题示例">
+            <p>矩阵题每一行算一道题，一行的概率之和为 100。</p>
+
+            <h6>下拉框题</h6>
+            <p>下拉框题同单选题：为每个真实选项设置出现概率，概率之和为 100。
+                列表中第一项「请选择」为占位项，无需配置概率。</p>
+
+            <h6>份数与耗时</h6>
+            <p>问卷总份数在 <strong>1~1000 份</strong>之间。可以用<strong>一键随机概率</strong>按钮快速设置概率。
+                一千份问卷大约耗时两个半小时。</p>
+        </div>
+    </div>
+</div>
+
+
+<!-- 详细设置弹窗 -->
+<div id="detailSettingsModal" class="modal">
+    <div class="modal-content modal-content--settings">
+        <button type="button" class="close" aria-label="关闭">&times;</button>
+        <div class="modal-title">功能详细设置</div>
+
+        <!-- 代理错误提示（开刷时校验失败动态显示，位于 ip代理行上方） -->
+        <div id="proxyErrorBox" class="is-hidden">
+            <div class="proxy-error-text">
+                您需要输入ip代理链接
+            </div>
+        </div>
+
+        <!-- ip代理 -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="proxySwitch" class="form-check-input" checked>
+                <label class="form-check-label" for="proxySwitch">ip代理</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="若要刷问卷，这个功能必须开启！！！如果想要刷更多问卷，需要自己去提供IP代理的网站获取链接！"></i>
+            <span id="apiUrlGroup" class="grow">
+                <input type="text" id="apiUrl" class="form-control api-input"
+                       placeholder="粘贴你自己的代理IP提取链接（留空则使用本机IP）">
+            </span>
+            <button type="button" id="proxyHelpBtn" class="btn btn-sm btn-link proxy-help-btn">
+                如何获取ip代理
+            </button>
+        </div>
+
+        <!-- 时间控制 -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="timeControlSwitch" class="form-check-input">
+                <label class="form-check-label" for="timeControlSwitch">单份问卷时间控制</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="可以设置单份问卷的填写所花时间，关闭使用默认值。"></i>
+            <span id="timeControlGroup" class="grow is-hidden">
+                <span class="field-inline">
+                    <input type="number" id="minFillTime" class="form-control time-input"
+                           min="10" max="1200" value="30" aria-label="最短填写秒数">
+                    <span class="mono-label">秒 ~</span>
+                    <input type="number" id="maxFillTime" class="form-control time-input"
+                           min="10" max="1200" value="150" aria-label="最长填写秒数">
+                    <span class="mono-label">秒</span>
+                </span>
+            </span>
+        </div>
+
+        <!-- 倍速（默认关闭 = 一次一份；开启后可设 2~12） -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="speedSwitch" class="form-check-input">
+                <label class="form-check-label" for="speedSwitch">倍速</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="开启后可设置倍速（2~12），倍速越高，填写速度越快，但是容易被监测。"></i>
+            <span id="speedGroup" class="grow field-inline is-hidden">
+                <input type="number" id="speedValue" class="form-control time-input"
+                       min="2" max="12" value="2" aria-label="同时提交份数">
+                <span class="mono-label">份同时</span>
+            </span>
+        </div>
+
+        <!-- IP 复用：关闭 = 一 IP 一份；开启 = 一 IP 可填 1~10 份 -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="ipReuseSwitch" class="form-check-input">
+                <label class="form-check-label" for="ipReuseSwitch">IP 复用</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="打开后，一个IP可填多份问卷，可以更省代理。但是最后刷的问卷数量会差目标问卷可能一部分！<br>同一 IP 短时间内提交多份，<b>更容易被风控检测到，导致要求人工验证、甚至整批停止</b>，建议 1~2 份/IP。"></i>
+            <span id="ipReuseGroup" class="grow field-inline is-hidden">
+                <input type="number" id="ipMaxUse" class="form-control time-input"
+                       min="1" max="10" value="2" aria-label="每个IP填写份数">
+                <span class="mono-label">份 / 每个 IP</span>
+            </span>
+        </div>
+
+        <!-- 提交来源比例 -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="sourceRatioSwitch" class="form-check-input">
+                <label class="form-check-label" for="sourceRatioSwitch">提交来源比例</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="可以设置问卷填写来源，关闭默认链接提交。"></i>
+            <span class="grow">
+                <span id="sourceRatioTotal" class="mono-label">合计 100%</span>
+            </span>
+        </div>
+        <div id="sourceRatioGroup" class="source-ratio is-hidden">
+            <div class="source-item">
+                <span class="source-label">手机提交</span>
+                <input type="range" id="srcMobileRange" class="source-range" min="0" max="100" value="33" aria-label="手机提交比例">
+                <span class="source-value">
+                    <input type="number" id="srcMobile" class="form-control source-input" min="0" max="100" value="33" aria-label="手机提交比例">
+                    <span class="mono-label">%</span>
+                </span>
+            </div>
+            <div class="source-item">
+                <span class="source-label">链接提交</span>
+                <input type="range" id="srcLinkRange" class="source-range" min="0" max="100" value="33" aria-label="链接提交比例">
+                <span class="source-value">
+                    <input type="number" id="srcLink" class="form-control source-input" min="0" max="100" value="33" aria-label="链接提交比例">
+                    <span class="mono-label">%</span>
+                </span>
+            </div>
+            <div class="source-item">
+                <span class="source-label">微信提交</span>
+                <input type="range" id="srcWechatRange" class="source-range" min="0" max="100" value="34" aria-label="微信提交比例">
+                <span class="source-value">
+                    <input type="number" id="srcWechat" class="form-control source-input" min="0" max="100" value="34" aria-label="微信提交比例">
+                    <span class="mono-label">%</span>
+                </span>
+            </div>
+        </div>
+
+        <!-- 数据目标：信度 / 效度 / 结论，一次配完 -->
+        <!-- 数据目标：开关一行，配置块单独一块（默认收起，与其它模块一致） -->
+        <div class="setting-row">
+            <div class="form-check form-switch">
+                <input type="checkbox" id="goalEnabled" class="form-check-input">
+                <label class="form-check-label" for="goalEnabled">数据目标</label>
+            </div>
+            <i class="fa fa-question-circle help-icon" aria-hidden="true"
+               data-tip="开启后按你设定的指标生成答卷：量表可信（信度 α）、因子有效（KMO）、模型出结论（指定变量按正/负向显著）。不开启就按普通随机方式填写。"></i>
+            <span id="goalSummary" class="validity-hint" role="status"></span>
+        </div>
+
+        <div id="goalBodyGroup" class="is-hidden"
+             style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:6px 0 8px">
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalAlpha" style="margin:0">信度 α</label>
+                <input id="goalAlpha" type="number" step="0.01" value="0.85"
+                       style="width:66px;height:30px;padding:2px 6px;text-align:center;font-size:13px;border:1px solid #ddd;border-radius:6px">
+            </span>
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalKmo" style="margin:0">效度 KMO</label>
+                <input id="goalKmo" type="number" step="0.01" value="0.70"
+                       style="width:66px;height:30px;padding:2px 6px;text-align:center;font-size:13px;border:1px solid #ddd;border-radius:6px">
+            </span>
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalSig" style="margin:0">至少显著</label>
+                <input id="goalSig" type="number" min="0" max="9" step="1" value="2"
+                       style="width:50px;height:30px;padding:2px 6px;text-align:center;font-size:13px;border:1px solid #ddd;border-radius:6px">
+                <span class="mono-label">项</span>
+            </span>
+        </div>
+
+        <div id="goalTargetGroup" class="is-hidden"
+             style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:0 0 8px">
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalOutcome" style="margin:0">结局题</label>
+                <select id="goalOutcome" style="width:230px;height:30px;font-size:13px;padding:2px 6px;border:1px solid #ddd;border-radius:6px"></select>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="你要研究的结果（因变量）。比如「总体满意度」，后面那些影响因素就是用来解释它的。"></i>
+            </span>
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalPositive" style="margin:0">算作正面</label>
+                <select id="goalPositive" style="width:150px;height:30px;font-size:13px;padding:2px 6px;border:1px solid #ddd;border-radius:6px"></select>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="这个结局题里，哪个选项算「正面/满意」。选它会记成 1，其余选项记成 0，回归就是拿这个 1 去分析。"></i>
+            </span>
+        </div>
+
+        <div id="goalFactorGroup" class="is-hidden" style="display:block;padding:0 0 10px">
+            <div style="width:100%">
+                <label class="mono-label" style="display:block;margin-bottom:2px">影响因素（自变量）</label>
+                <div style="color:#999;font-size:12px;margin-bottom:6px">
+                    勾选你想让它「显著」的项目并选方向。矩阵题按行拆开（如 第5题(颜值)、第5题(性格)），可以分别设方向。正向=分越高越容易得到正面结局，负向=越不容易，不显著=故意让它没关系。
+                </div>
+                <div id="goalFactors"
+                     style="display:flex;flex-wrap:wrap;gap:8px 18px;max-height:190px;overflow:auto;padding:4px 2px"></div>
+                <div id="goalHint" class="validity-hint" style="display:block;margin-top:6px" role="status"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- 快速上手 -->
+<div id="quickStartModal" class="modal">
+    <div class="modal-content modal-content--usage">
+        <button type="button" class="close" aria-label="关闭">&times;</button>
+        <div class="modal-title">快速上手</div>
+
+        <div class="modal-body">
+            <h6>1. 先把答案配好</h6>
+            <p>如果你不会配置信效度或者显著数，可以点「导出答题表」，
+                把导出的 CSV 文件交给 AI 修改。要求不同时，改一下提示词即可。</p>
+
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0 14px">
+                <button type="button" class="btn" id="quickExportCsv"
+                        style="border:2px solid #d9480f;color:#d9480f;font-weight:600;background:#fff">
+                    <i class="fa fa-download" aria-hidden="true"></i> 导出答题表（CSV）
+                </button>
+                <button type="button" class="btn" id="quickImportCsv"
+                        style="border:2px solid #1c7ed6;color:#1c7ed6;font-weight:600;background:#fff">
+                    <i class="fa fa-upload" aria-hidden="true"></i> 导入答题表（CSV）
+                </button>
+            </div>
+
+            <p class="modal-note" style="margin-top:0">
+                表格一行一个选项，只改「权重」列即可，不需要凑满 100（导入时自动归一化）。
+                可以只保留要改的题，没出现的题保持原样。
+            </p>
+
+            <h6 style="margin-top:16px">2. 让 AI 帮你配（附示例提示词）</h6>
+            <p style="margin-bottom:8px">
+                例：假如我想要问卷信效度 0.85，且跑模型出 2 个显著，
+                可以用如下提示词，直接带着 CSV 文件发给 AI：
+            </p>
+
+            <div id="aiPromptBox" style="position:relative;margin:10px 0 14px">
+                <button type="button" id="copyPromptBtn" title="复制提示词"
+                        style="position:absolute;top:8px;right:8px;z-index:2;width:32px;height:32px;
+                               border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;
+                               display:flex;align-items:center;justify-content:center">
+                    <i class="fa fa-copy" aria-hidden="true"></i>
+                </button>
+                <pre id="aiPromptText"
+                     style="margin:0;padding:14px 46px 14px 14px;max-height:260px;overflow:auto;
+                            background:#f7f7f8;border:1px solid #e6e6e6;border-radius:8px;
+                            font-size:12px;line-height:1.7;white-space:pre-wrap;word-break:break-word"></pre>
+            </div>
+
+            <h6>3. 设置数据目标（可选）</h6>
+            <p>想要量表可信（α）、因子有效（KMO）、指定变量显著，
+                在「功能详细设置 → 数据目标」里勾选并填指标，程序会按目标生成答卷。</p>
+
+            <h6>4. 开刷</h6>
+            <p>填目标份数，点底部橙色按钮。跑完在结果页能看到「数据目标体检」
+                （α / KMO / 每个变量的方向与 p 值）。</p>
+
+            <h6>5. 常见问题</h6>
+            <p style="margin-bottom:4px">· 一直提示「需要人工验证」：问卷开了智能验证，降低并发、开启代理、或减少份数；</p>
+            <p style="margin-bottom:4px">· 出口不够：把「IP 复用」调大，或换一个能一次给多个 IP 的提取链接；</p>
+            <p style="margin-bottom:14px">· 时间对不上：确认「单份问卷时间控制」区间设置合理（10 秒 ~ 20 分钟）。</p>
+
+            <div style="border-top:1px dashed #e0e0e0;padding-top:14px;margin-top:6px;text-align:center">
+                <p style="margin:0 0 10px;color:#666;font-size:13px">
+                    如果你实在需要帮助，可以微信联系：<strong>ycyljcl66</strong>
+                    ，或加入交流群：<strong>1093553265</strong>
+                </p>
+                <img src="/static/pictures/group/group.png" alt="交流群二维码"
+                     style="max-width:220px;width:100%;border-radius:8px">
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 如何获取 ip 代理 引导弹窗 -->
+<div id="proxyHelpModal" class="modal">
+    <div class="modal-content modal-content--usage">
+        <button type="button" class="close" aria-label="关闭">&times;</button>
+        <div class="modal-title">如何获取 IP 代理</div>
+
+        <div class="modal-body">
+            <p>因为问卷星风控，同一个 IP 最多只能刷 12 份问卷，所以想要大量刷问卷，就需要代理 IP。</p>
+            <p>所谓「代理 IP 提取链接」，就是一个链接，访问它会返回类似下面的内容：</p>
+            <div class="proxy-example">14.116.214.89:44937</div>
+            <p>把这个链接粘贴到「ip代理」输入框，脚本每次填问卷前都会访问它拿到一个新 IP。</p>
+            <p>下面以 <strong>51 代理</strong>为例（没有广告，用这个是因为注册会送 20 元体验金，差不多可以刷几万份问卷）：</p>
+
+            <h6>1. 打开 51 代理网址：<a class="proxy-reg-link"
+                    href="https://www.51daili.com/index/user/promotion/parent_id/29121/code/MFD8ec8n.html"
+                    target="_blank" rel="noopener noreferrer">https://www.51daili.com/index/user/promotion/parent_id/29121/code/MFD8ec8n.html</a>
+                然后点击免费注册</h6>
+            <img class="tutorial-img" src="static/pictures/test/1.png"
+                 alt="51代理官网免费注册" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>2. 按照要求填写信息注册</h6>
+            <img class="tutorial-img" src="static/pictures/test/2.png"
+                 alt="填写信息注册" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>3. 因为国家对代理IP安全比较重视，所以需要先实名认证</h6>
+            <img class="tutorial-img" src="static/pictures/test/3.png"
+                 alt="实名认证" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>4. 点击白名单，查看红圈这里的IP地址，将地址填入框里，然后点击添加IP</h6>
+            <img class="tutorial-img" src="static/pictures/test/4.png"
+                 alt="添加白名单" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>5. 点击API提取</h6>
+            <img class="tutorial-img" src="static/pictures/test/5.png"
+                 alt="API提取" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>6. 套餐选送的20积分，提取数量1至3，数越大速度越快，稳定使用时长推荐3分钟，选择地区这里看你想要问卷是哪个地区给你填，你就选哪里，其余按我选的来就行，再点击生成API链接</h6>
+            <img class="tutorial-img" src="static/pictures/test/6.png"
+                 alt="生成API链接" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>7. 生成出来的链接类似于如图</h6>
+            <img class="tutorial-img" src="static/pictures/test/7.png"
+                 alt="API链接示例" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <h6>8. 最后复制链接，到工具粘贴进去就可以正常使用了</h6>
+            <img class="tutorial-img" src="static/pictures/test/8.png"
+                 alt="粘贴使用" onclick="openImageViewer(this.src)" loading="lazy">
+
+            <p class="proxy-note">小图看不清的话，点击图片即可放大查看。你也可以使用其他任何代理服务商的提取链接，只要访问后能返回「IP:端口」即可。</p>
+        </div>
+    </div>
+</div>
+
+<!-- 图片放大查看器（点击教程图片后全屏展示） -->
+<div id="imageViewer" class="image-viewer" onclick="closeImageViewer()">
+    <img id="imageViewerImg" src="" alt="放大查看">
+</div>
+
+<!-- 通用确认对话框（替代阻塞式 window.confirm） -->
+<div id="confirmModal" class="modal">
+    <div class="modal-content modal-content--confirm">
+        <div class="modal-title" id="confirmTitle">确认操作</div>
+        <div class="modal-body">
+            <dl class="confirm-list" id="confirmList"></dl>
+            <p class="confirm-note" id="confirmMessage"></p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn" id="confirmCancel">取消</button>
+            <button type="button" class="btn btn-primary" id="confirmOk">确认</button>
+        </div>
+    </div>
+</div>
+
+<!-- 右下角赞助组件：默认只露一个圆形头像，鼠标悬停（或点击）后向上展开 -->
+<div id="donate" class="donate is-hidden">
+    <div class="donate-card">
+        <button type="button" class="donate-close" id="donateClose" aria-label="关闭">&times;</button>
+        <div class="donate-title">自愿赞助</div>
+        <p class="donate-desc">如果这个工具帮到了你，欢迎请我喝杯奶茶～纯自愿，本工具永远免费。</p>
+        <img class="donate-qr" src="/static/pictures/a.png" alt="微信收款码">
+    </div>
+    <button type="button" class="donate-fab" id="donateFab" aria-label="支持作者" aria-expanded="false">
+        <img src="/static/pictures/头像.jpg" alt="">
+    </button>
+</div>
+
+<script src="/static/js/request.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/alert.js"></script>
+<script src="/static/js/probability-validator.js"></script>
+<script src="/static/js/answers-csv.js"></script>
+    <script src="/static/js/goal-panel.js"></script>
+    <script src="/static/js/analysis.js"></script>
+<!-- 软件自带确认框（含桌面端关窗钩子）：后加载以覆盖 analysis.js 内的旧版 -->
+<script src="/static/js/confirm.js"></script>
+
+<script>
+    // 为初始输入框添加 blur 校验
+    function addBlurListenersToInitialInputs() {
+        const answerList = document.getElementById('answerList');
+        if (!answerList) return;
+
+        const answerItems = answerList.getElementsByClassName('answer-item');
+        for (let i = 0; i < answerItems.length; i++) {
+            const item = answerItems[i];
+            const textInput = item.getElementsByClassName('answer-text')[0];
+            const probabilityInput = item.getElementsByClassName('probability-input')[0];
+
+            if (textInput && probabilityInput) {
+                textInput.addEventListener('blur', function () {
+                    validateSingleAnswerItem(textInput, probabilityInput);
+                });
+                probabilityInput.addEventListener('blur', function () {
+                    validateSingleAnswerItem(textInput, probabilityInput);
+                });
+            }
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', function () {
+        addBlurListenersToInitialInputs();
+    });
+
+    // confirmBack() 统一定义在 analysis.js 中（使用自定义确认对话框）
+
+    // ===== 图片放大查看器：点击教程图片全屏展示，点击任意处关闭 =====
+    function openImageViewer(src) {
+        var viewer = document.getElementById('imageViewer');
+        var img = document.getElementById('imageViewerImg');
+        img.src = src;
+        viewer.classList.add('is-open');
+    }
+
+    function closeImageViewer() {
+        var viewer = document.getElementById('imageViewer');
+        var img = document.getElementById('imageViewerImg');
+        viewer.classList.remove('is-open');
+        // 延迟清空 src，避免关闭动画期间闪一下
+        setTimeout(function () { img.src = ''; }, 200);
+    }
+
+    // 按 Esc 也能关闭放大图
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            closeImageViewer();
+        }
+    });
+</script>
+</body>
+</html>

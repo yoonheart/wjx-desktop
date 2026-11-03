@@ -1,0 +1,153 @@
+WJX-DESKTOP 非商业使用许可证  v1.0
+WJX-DESKTOP NON-COMMERCIAL LICENSE  v1.0
+
+SPDX-License-Identifier: LicenseRef-WJX-NC-1.0
+
+版权所有 (c) 2026 yoonheart
+Copyright (c) 2026 yoonheart
+
+本许可证是一份"源码可见、非商业使用"的许可协议，不属于 OSI 认可的开源许可证。
+This is a source-available, non-commercial license. It is NOT an OSI-approved open-source license.
+
+================================================================
+一、中文版本
+================================================================
+
+【前言】
+本软件用于问卷协议的学习、研究与技术验证。为尊重作者劳动并防止滥用，
+特制定本许可证。凡复制、使用、修改或分发本软件，即视为你已阅读并同意本许可证全部条款。
+
+第 1 条  定义
+
+1.1 "本软件"指 wjx-desktop 项目及其全部源代码、文档、配置文件、图片、脚本与随附材料，
+    包括其任何修改版本或衍生作品。
+
+1.2 "商业用途"指以直接或间接获取经济利益为目的的使用，包括但不限于：
+    (a) 销售、出租、许可本软件或其修改版本；
+    (b) 以本软件为基础提供收费服务（含代填、代刷、咨询、培训、运维等）；
+    (c) 将本软件或其代码集成进任何商业产品或商业服务；
+    (d) 用于企业内部经营性业务或对外收费的运营活动；
+    (e) 通过本软件引流、变现或获取广告、佣金等收益。
+
+1.3 "非商业用途"指个人学习、学术研究、教学演示、技术交流等不以营利为目的的使用。
+
+第 2 条  授权
+
+在完全遵守本许可证的前提下，你被免费授予以下非排他性权利：
+
+2.1 使用、运行本软件；
+2.2 复制、修改本软件；
+2.3 在非商业目的下分发本软件及其修改版本。
+
+第 3 条  条件
+
+3.1 你必须完整保留本许可证文本与全部版权声明，不得删除或篡改；
+3.2 分发修改版本时，必须同样采用本许可证，并显著标注你所做的修改；
+3.3 不得暗示本软件作者为你或你的修改版本背书；
+3.4 你不得移除、规避或修改本软件中的任何许可提示、免责声明或来源标识。
+
+第 4 条  禁止
+
+4.1 禁止将本软件用于任何形式的商业用途（见第 1.2 条）；
+4.2 禁止将本软件用于刷量、污染他人问卷数据、伪造数据、侵犯他人隐私，
+    或其他违反问卷平台服务条款、违反法律法规的行为；
+4.3 禁止以本软件为基础提供任何收费服务；
+4.4 禁止移除或规避本许可证及版权声明。
+
+第 5 条  免责声明
+
+本软件按"现状"（AS IS）提供，不附带任何明示或暗示的担保，包括但不限于
+适销性、特定用途适用性与不侵权的担保。作者不对使用本软件所产生的任何直接、
+间接、偶然、特殊或后果性损害承担责任，包括但不限于数据丢失、账号封禁、
+法律纠纷或第三方索赔。你应自行评估并承担使用本软件的全部风险与法律责任。
+
+第 6 条  终止
+
+你一旦违反本许可证任一条款，本许可证授予你的全部权利立即自动终止。
+终止后，你必须停止使用并删除本软件的全部副本。作者保留追究法律责任的权利。
+
+第 7 条  其他
+
+7.1 本许可证适用中华人民共和国法律（不含冲突法规则）。
+7.2 本许可证任何条款被认定无效或不可执行的，不影响其余条款的效力。
+7.3 作者保留随时更新本许可证的权利；更新后的版本自发布之日起生效。
+
+================================================================
+二、ENGLISH VERSION
+================================================================
+
+[Preamble]
+This software is provided for the study, research and technical verification of survey
+protocols. This License is established to respect the author's work and prevent misuse.
+By copying, using, modifying or distributing this software, you agree to all terms herein.
+
+1. DEFINITIONS
+
+1.1 "Software" means the wjx-desktop project and all of its source code, documentation,
+    configuration files, images, scripts and accompanying materials, including any
+    modified versions or derivative works.
+
+1.2 "Commercial Use" means any use for direct or indirect commercial advantage or
+    monetary compensation, including but not limited to:
+    (a) selling, renting or licensing the Software or modified versions;
+    (b) providing paid services based on the Software (including paid form-filling,
+        consulting, training or operations);
+    (c) integrating the Software or its code into any commercial product or service;
+    (d) use in for-profit business operations;
+    (e) monetizing the Software through traffic, advertising or commissions.
+
+1.3 "Non-Commercial Use" means personal study, academic research, teaching
+    demonstration and technical exchange without profit-making purposes.
+
+2. GRANT
+
+Subject to full compliance with this License, you are granted a free, non-exclusive right to:
+2.1 use and run the Software;
+2.2 copy and modify the Software;
+2.3 distribute the Software and modified versions for non-commercial purposes only.
+
+3. CONDITIONS
+
+3.1 You must retain this License text and all copyright notices in full;
+3.2 Modified versions must be distributed under this same License, with prominent
+    notice of the changes made;
+3.3 You may not imply that the author endorses you or your modified version;
+3.4 You may not remove, circumvent or alter any license notice, disclaimer or
+    attribution contained in the Software.
+
+4. PROHIBITIONS
+
+4.1 Commercial Use of any kind is prohibited (see Section 1.2);
+4.2 Use for vote/survey manipulation, polluting others' survey data, fabricating data,
+    invading privacy, or any activity violating survey platform terms or applicable law
+    is prohibited;
+4.3 Providing any paid service based on the Software is prohibited;
+4.4 Removing or circumventing this License or copyright notices is prohibited.
+
+5. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+6. TERMINATION
+
+Your rights under this License terminate automatically upon any breach of its terms.
+Upon termination you must cease all use and delete all copies of the Software.
+The author reserves the right to pursue legal remedies.
+
+7. MISCELLANEOUS
+
+7.1 This License shall be governed by the laws of the People's Republic of China.
+7.2 If any provision is held invalid or unenforceable, the remaining provisions
+    shall remain in full force and effect.
+7.3 The author may update this License at any time; the updated version takes effect
+    upon publication.
+
+================================================================
+如需商业授权，请通过 GitHub Issue 联系作者。
+For commercial licensing, please contact the author via GitHub Issue.
+================================================================
