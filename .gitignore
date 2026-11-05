@@ -58,9 +58,8 @@ htmlcov/
 *.sqlite3
 export/
 *.pid
-# 代理提取链接、账号密码只存在本地方案文件里，不要提交
+# 方案文件含代理提取链接，只存在本地用户目录，不进仓库
 profile.json
-banned_terms.local.txt
 
 # ---- 运行时数据（本地生成，不入库）----
 data/
