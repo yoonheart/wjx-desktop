@@ -72,12 +72,16 @@
         const dirs = Object.keys(goal.directions || {}).map(function (qid) {
             return qid + ':' + goal.directions[qid];
         }).join(',');
+        const items = (goal.outcome_items || []).slice();
+        const aggregate = goal.outcome_aggregate || (items.length > 1 ? 'mean' : 'single');
         return [
             '# 启用,是',
             '# 信度α,' + goal.alpha_target,
             '# 效度KMO,' + goal.kmo_target,
             '# 至少显著,' + goal.significant_required,
             '# 结局题,' + (goal.outcome_question || ''),
+            '# 结局项,' + items.join(','),
+            '# 结局合成,' + aggregate,
             '# 算作正面,' + ((goal.positive_options && goal.positive_options[0]) || ''),
             '# 影响因素,' + dirs
         ];
@@ -355,11 +359,28 @@
         if (settings['信度α']) setValue('goalAlpha', settings['信度α']);
         if (settings['效度KMO']) setValue('goalKmo', settings['效度KMO']);
         if (settings['至少显著']) setValue('goalSig', settings['至少显著']);
-        if (settings['结局题']) {
-            setValue('goalOutcome', settings['结局题']);
+
+        // 结局：优先读「结局项」（可含矩阵行、可多个），退回旧的「结局题」
+        const itemText = (settings['结局项'] || settings['结局题'] || '').trim();
+        if (itemText) {
+            const refs = itemText.split(/[,;\s]+/).filter(function (x) { return /^\d+$/.test(x); });
             const outcome = document.getElementById('goalOutcome');
-            if (outcome) {
-                outcome.dispatchEvent(new Event('change', { bubbles: true }));
+            if (outcome && refs.length) {
+                const exists = Array.prototype.some.call(outcome.options, function (opt) {
+                    return opt.value === refs[0];
+                });
+                if (!exists) {
+                    errors.push('数据目标：结局项 ' + refs[0] + ' 不在问卷里');
+                } else {
+                    outcome.value = refs[0];
+                    outcome.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+            const meanBox = document.getElementById('goalOutcomeMean');
+            if (meanBox) {
+                const aggregate = (settings['结局合成'] || '').trim();
+                meanBox.checked = aggregate === 'mean' || refs.length > 1;
+                meanBox.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }
         if (settings['算作正面']) setValue('goalPositive', settings['算作正面']);
@@ -488,9 +509,15 @@
         '   # 效度KMO → 0.60（若可参与项目 ≥ 4 个可写 0.70）',
         '   # 至少显著 → 2',
         '',
-        '2. 结局题（因变量）：',
-        '   只能选【单选题】或【量表题】，把题号写进 # 结局题；',
-        '   再把该题里代表"满意/正面"的选项序号写进 # 算作正面。',
+        '2. 结局（因变量）：',
+        '   可写进 # 结局项，格式是项目编号，英文逗号分隔：',
+        '   - 单选题 / 量表题：直接写题号，如 8',
+        '   - 矩阵题的某一行：题号×100＋行号，如 503 表示第5题第3行',
+        '   - 多维构念（矩阵多行取均值）：如 501,502,503，同时把 # 结局合成 写成 mean',
+        '   # 结局合成 只取 single 或 mean；single 表示只用第一个项目。',
+        '   只有【单选题】结局需要 # 算作正面（哪个选项算“满意/正面”）；',
+        '   量表与矩阵行是连续分，不用填 # 算作正面。',
+        '   # 结局题 是旧字段（只写题号），保留兼容，填了也不影响。',
         '',
         '3. 影响因素（自变量）：',
         '   可用的项目＝【量表题】与【矩阵题的每一行】。',
@@ -498,6 +525,7 @@
         '   写入 # 影响因素，格式 题号:方向（+ 正向 / - 负向 / 0 故意不显著），',
         '   英文逗号分隔。示例：4:+,501:+,502:-',
         '   至少要选 2 个，且方向不要写成同一个极端，否则回归里会互相抵消。',
+        '   注意：已经用作结局的项目不要再写进影响因素（自己解释自己没有意义）。',
         '',
         '4. 权重列：',
         '   每行填 0~100 的整数，同一题内要有主次（如 60/30/10）；',

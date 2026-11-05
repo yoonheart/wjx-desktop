@@ -144,6 +144,15 @@ class TaskRunner:
 
         plan = build_plan(self.survey, self.strategy.validity)
 
+        # 提取预算：点一次「开刷」算一个任务，最多向上游要 目标份数×1.5 个 IP。
+        # 以前没有这个刹车，一次任务能提取几千个，钱花了却用不上。
+        try:
+            budget = max(3, int(round(self.strategy.total * 1.5)))
+            self.pool.max_fetch = budget
+            logger.info("提取预算：本次最多 %d 个 IP（目标 %d 份 × 1.5）", budget, self.strategy.total)
+        except Exception:
+            pass
+
         # 并发自适应：出口不够时降到池子能支撑的量，而不是干等
         self._emit(TaskState.PREPARING, note="正在获取出口 IP…")
         capacity = self.strategy.concurrency
@@ -304,6 +313,12 @@ class TaskRunner:
             elapsed,
             getattr(self.pool, "fetched_total", 0),
         )
+        bill = getattr(self.pool, "bill", None)
+        if callable(bill):
+            try:
+                logger.info("IP 账单：%s", bill())
+            except Exception:
+                pass
         for problem in gate_report.problems:
             logger.warning("整批体检：%s", problem)
 
@@ -356,6 +371,14 @@ class TaskRunner:
         self._all_sheets.append(sheet)
 
         duration = self.pacer.sample_duration(self.survey.size)
+
+        if getattr(self.pool, "fused", False):
+            reason = getattr(self.pool, "fuse_message", lambda: "代理不可用")()
+            self._finished_reason = reason
+            logger.error(reason)
+            error_log.error(reason)
+            self.request_stop()
+            return
 
         try:
             exit_node = await self.pool.acquire_waiting()
@@ -465,6 +488,15 @@ class TaskRunner:
                 if callable(release_ok):
                     release_ok(addr, ok=True)
                 self._mark(unit, seed, UnitState.CONFIRMED, None, "", addr, ua, elapsed_ms, attempts - 1)
+                return
+
+            # 代理认证失败是配置问题，重试再多次也不会好：立刻整批停下并说明原因
+            if outcome.failure is FailureKind.PROXY_AUTH:
+                self._mark(unit, seed, UnitState.FATAL, outcome.failure, outcome.detail, addr, ua, elapsed_ms, attempts)
+                logger.error(outcome.detail)
+                error_log.error(outcome.detail)
+                self._finished_reason = outcome.detail
+                self.request_stop()
                 return
 
             if (
@@ -651,6 +683,16 @@ class TaskRunner:
             retries=retries,
         )
         self._records.append(record)
+
+        # 熔断计数：连续失败到阈值就判定代理坏掉，停止继续买 IP
+        note_ok = getattr(self.pool, "note_success", None)
+        note_bad = getattr(self.pool, "note_failure", None)
+        if state is UnitState.CONFIRMED:
+            if callable(note_ok):
+                note_ok()
+        elif state is UnitState.FATAL and failure is not None:
+            if callable(note_bad):
+                note_bad(f"{failure.value} {detail}"[:80])
 
         if state is UnitState.CONFIRMED:
             self._counters.confirmed += 1

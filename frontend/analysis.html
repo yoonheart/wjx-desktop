@@ -49,7 +49,7 @@
             <div class="toolbar">
 <div class="toolbar-field">
                     <label for="targetCount" class="mono-label">目标份数</label>
-                    <input type="number" id="targetCount" class="form-control" min="1" max="1000" value="1">
+                    <input type="number" id="targetCount" class="form-control" min="1" max="9999" value="1">
                     <span class="mono-label">份</span>
                 </div>
                 <button type="button" class="btn btn-sm" id="randomProbBtn">
@@ -216,7 +216,7 @@
                 列表中第一项「请选择」为占位项，无需配置概率。</p>
 
             <h6>份数与耗时</h6>
-            <p>问卷总份数在 <strong>1~1000 份</strong>之间。可以用<strong>一键随机概率</strong>按钮快速设置概率。
+            <p>问卷总份数在 <strong>1~9999 份</strong>之间。可以用<strong>一键随机概率</strong>按钮快速设置概率。
                 一千份问卷大约耗时两个半小时。</p>
         </div>
     </div>
@@ -295,7 +295,7 @@
                 <label class="form-check-label" for="ipReuseSwitch">IP 复用</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               data-tip="打开后，一个IP可填多份问卷，可以更省代理。但是最后刷的问卷数量会差目标问卷可能一部分！<br>同一 IP 短时间内提交多份，<b>更容易被风控检测到，导致要求人工验证、甚至整批停止</b>，建议 1~2 份/IP。"></i>
+               data-tip="打开后，一个IP可填多份问卷，可以更省代理，但是最后刷的问卷数量会差目标问卷可能一部分！另外同一 IP 短时间内提交多份，更容易被风控检测到，导致要求人工验证甚至整批停止，建议 1~2 份/IP。"></i>
             <span id="ipReuseGroup" class="grow field-inline is-hidden">
                 <input type="number" id="ipMaxUse" class="form-control time-input"
                        min="1" max="10" value="2" aria-label="每个IP填写份数">
@@ -380,13 +380,21 @@
                 <label class="mono-label" for="goalOutcome" style="margin:0">结局题</label>
                 <select id="goalOutcome" style="width:230px;height:30px;font-size:13px;padding:2px 6px;border:1px solid #ddd;border-radius:6px"></select>
                 <i class="fa fa-question-circle help-icon" aria-hidden="true"
-                   data-tip="你要研究的结果（因变量）。比如「总体满意度」，后面那些影响因素就是用来解释它的。"></i>
+                   data-tip="你要研究的结果（因变量）。可以选单选题、量表题，也可以选矩阵题的某一行；整道矩阵不行——一题多行是多个变量，结局必须收成一个数。"></i>
             </span>
-            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+            <span id="goalOutcomeMeanLabel" class="field-inline is-hidden" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalOutcomeMean" style="margin:0;cursor:pointer">
+                    <input type="checkbox" id="goalOutcomeMean" style="margin-right:4px">
+                    整题各行取均值
+                </label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="勾上后，把这道矩阵题的所有行当成一个构念，取均值作为因变量（例如满意度含服务/环境/价格三行）。不勾则只用你选中的那一行。"></i>
+            </span>
+            <span id="goalPositiveGroup" class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
                 <label class="mono-label" for="goalPositive" style="margin:0">算作正面</label>
                 <select id="goalPositive" style="width:150px;height:30px;font-size:13px;padding:2px 6px;border:1px solid #ddd;border-radius:6px"></select>
                 <i class="fa fa-question-circle help-icon" aria-hidden="true"
-                   data-tip="这个结局题里，哪个选项算「正面/满意」。选它会记成 1，其余选项记成 0，回归就是拿这个 1 去分析。"></i>
+                   data-tip="这个结局题里，哪个选项算「正面/满意」。选它会记成 1，其余选项记成 0，回归就是拿这个 1 去分析。量表与矩阵行本身就是连续分，不需要这一项。"></i>
             </span>
         </div>
 

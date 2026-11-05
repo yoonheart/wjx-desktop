@@ -20,6 +20,14 @@ class WjxClassifier:
         self._spec = manifest.verdict
 
     def classify(self, response: RawResponse) -> SubmissionOutcome:
+        # 407 = 代理要求账号密码。这是配置问题，重试再多次也不会好，
+        # 必须单独归类，让上层立刻停批并提示用户改认证方式。
+        if response.status_code == 407 or "407" in str(response.error or ""):
+            return SubmissionOutcome(
+                Verdict.UNKNOWN,
+                FailureKind.PROXY_AUTH,
+                "代理要求认证（407）：请在代理后台切换白名单模式，或让提取链接返回账号密码",
+            )
         if response.error:
             return SubmissionOutcome(Verdict.UNKNOWN, FailureKind.NETWORK, response.error)
         if response.status_code == 0:

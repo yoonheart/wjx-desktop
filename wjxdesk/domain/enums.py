@@ -73,6 +73,7 @@ class UnitState(str, Enum):
     CONFIRMED = "CONFIRMED"
     RETRYABLE = "RETRYABLE"
     FATAL = "FATAL"
+    PROXY_AUTH = "PROXY_AUTH"
     UNKNOWN = "UNKNOWN"
 
     @property
@@ -88,6 +89,7 @@ class FailureKind(str, Enum):
     CLOSED = "CLOSED"
     LIMIT = "LIMIT"
     FORMAT = "FORMAT"
+    PROXY_AUTH = "PROXY_AUTH"
     UNKNOWN = "UNKNOWN"
 
     @property
@@ -101,6 +103,7 @@ class FailureKind(str, Enum):
 
 _ADVICE: dict[FailureKind, str] = {
     FailureKind.NETWORK: "网络不稳，正在自动重试",
+    FailureKind.PROXY_AUTH: "代理要求认证：在代理后台切换白名单模式，或让提取链接返回账号密码",
     FailureKind.EXIT_UNUSABLE: "出口不可用，已换线重试",
     FailureKind.THROTTLED: "触发频率限制，已自动降速并冷却该出口",
     FailureKind.NEED_VERIFY: "需要人工验证，任务已暂停",

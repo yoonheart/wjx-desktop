@@ -1,0 +1,86 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.whl
+MANIFEST
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+ENV/
+__pypackages__/
+
+# ---- 构建 / 打包产物（不入库）----
+build/
+dist/
+release/
+*.spec
+!build_app.spec
+# 重命名留档的旧产物（dist.old / dist_new / 问卷星助手.old 之类）
+dist.*/
+dist_*/
+*.old/
+
+# ---- 测试 / 静态检查缓存 ----
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.nox/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+.history/
+*.iml
+*.swp
+*~
+
+# ---- 敏感信息 / 本地数据（防误提交）----
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+export/
+*.pid
+# 代理提取链接、账号密码只存在本地方案文件里，不要提交
+profile.json
+banned_terms.local.txt
+
+# ---- 运行时数据（本地生成，不入库）----
+data/
+logs/
+*.local.txt
+*.log
+
+# ---- 临时 / 合并残留 ----
+*.orig
+*.rej
+*.bak
+*.tmp
+*.cache/
+.cache/
+.ipynb_checkpoints/
+
+# ---- 本工具会话数据 ----
+.workbuddy/
+
+# ---- 系统文件 ----
+.DS_Store
+Thumbs.db
+desktop.ini

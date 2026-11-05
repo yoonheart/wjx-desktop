@@ -23,6 +23,8 @@ a = Analysis(
         # 协议清单随包，避免运行时找不到
         (str(ROOT / "wjxdesk" / "protocol" / "wjx" / "manifest.json"),
          "wjxdesk/protocol/wjx"),
+        # 应用图标：窗口图标（branding.py 按 wjxdesk/assets 找）与 exe 图标共用
+        (str(ROOT / "wjxdesk" / "assets"), "wjxdesk/assets"),
     ],
     hiddenimports=[
         "uvicorn.logging",
@@ -60,7 +62,7 @@ exe = EXE(
     upx=False,
     console=False,          # 双击不弹黑框
     disable_windowed_traceback=False,
-    icon=str(ROOT / "build" / "app.ico") if (ROOT / "build" / "app.ico").exists() else None,
+    icon=str(ROOT / "wjxdesk" / "assets" / "app.ico"),
 )
 
 coll = COLLECT(

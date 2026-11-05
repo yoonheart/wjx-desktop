@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 from wjxdesk.domain.answer import AnswerSheet, ItemAnswer
 from wjxdesk.domain.enums import ItemKind
-from wjxdesk.domain.goal import ResearchGoal
+from wjxdesk.domain.goal import AGGREGATE_MEAN, ResearchGoal, split_ref
 from wjxdesk.domain.strategy import Strategy
 from wjxdesk.domain.survey import Survey
 from wjxdesk.engine.controller import build_matrix
@@ -109,19 +109,44 @@ def _p_value(r: float, n: int) -> float:
 
 
 def _error_ratio(k: int, alpha: float) -> float:
-    """由目标 α 反推「误差方差 / 题目数」的比值。
+    """由目标 α 反推「误差方差 / 因子方差」的比值。
 
-    α = k/(k-1) · 1/(1+e²)  ⇒  e² = k/((k-1)α) - 1
+    设单题信度 ρ = 1/(1+e²)，则 α = kρ / (1 + (k-1)ρ)，反解得
+    ρ = α / (k - (k-1)α)，于是
+
+        e² = 1/ρ - 1 = k(1/α - 1)
+
+    注意 e² 与题目数 k 成正比：k 越大，同样的 e² 会得到更高的 α，
+    所以不能写成与 k 无关的常数（早期版本少乘了 k，导致题目多的维度
+    实际 α 偏高、与目标不符）。
     """
     alpha = max(0.30, min(0.98, alpha))
-    value = k / ((k - 1) * alpha) - 1.0 if k > 1 else 0.5
-    return max(0.02, value)
+    if k <= 1:
+        return 0.5
+    return max(0.02, k * (1.0 / alpha - 1.0))
 
 
 def _scale_index(z: float, count: int) -> int:
     """把标准正态值映射到 1..count 的选项下标（保留正态形状）。"""
     p = min(0.999, max(0.001, _normal_cdf(z)))
     return int(p * count) + 1
+
+
+def _option_from_fraction(fraction: float, count: int) -> int:
+    """把 0~1 的分位映射到 1..count 的档位（保序重排用）。"""
+    n = max(2, int(count))
+    return min(n, max(1, int(fraction * n) + 1))
+
+
+def _merge_matrix(answer: ItemAnswer | None, number: int, row: int, value: int) -> ItemAnswer:
+    """把一格的取值合并进矩阵题的答案，保持 `matrix` 与 `picks` 同步。"""
+    pairs = dict(answer.matrix) if answer is not None else {}
+    pairs[row] = int(value)
+    return ItemAnswer(
+        number=number,
+        picks=tuple(sorted(set(pairs.values()))),
+        matrix=tuple(sorted(pairs.items())),
+    )
 
 
 # --------------------------------------------------------------------------- 求解器
@@ -135,20 +160,62 @@ class GoalSolver:
         # 可构造的项目：量表题本身，以及矩阵题的每一行（行号记作 题号*100+行号）
         self.scale_items = [i for i in survey.items if i.kind is ItemKind.SCALE]
         self.matrix_items = [i for i in survey.items if i.kind is ItemKind.MATRIX]
+        # 结局：一个或多个项目；连续（量表/矩阵行）还是二分类（单选）由题型决定
+        self.outcome = self.goal.outcome
+        self.outcome_refs = self._normalize_outcome_refs(self.outcome.items)
+        self.outcome_numbers = set(self.outcome_refs)
+        self.outcome_mixed = len(self.outcome_refs) < len(self.outcome.items)
+        self.outcome_continuous = self._outcome_is_continuous()
+        self.outcome_positives = self._resolve_positives()
         self.dimensions = self._resolve_dimensions()
         self.seed = strategy.resolved_seed()
 
     # -- 结构 ---------------------------------------------------------------
 
-    def _resolve_dimensions(self) -> tuple[tuple[int, ...], ...]:
-        configured = tuple(
-            tuple(n for n in group if self._is_scorable(n)) for group in self.goal.dimensions
-        )
-        configured = tuple(g for g in configured if g)
-        if configured:
-            return configured
+    def _normalize_outcome_refs(self, refs: tuple[int, ...]) -> tuple[int, ...]:
+        """混着连续项（量表/矩阵行）与二分类项（单选）时，只保留连续项。
 
-        numbers = self._all_scorable()
+        正常配置不会出现（界面一次只选一项或同一矩阵的几行），这里防手写配置
+        json 把两类混在一起——那种情况下二分类项没法参与合成。
+        """
+        if len(refs) <= 1:
+            return refs
+        scorable = tuple(r for r in refs if self._ref_scorable(r))
+        return scorable if 0 < len(scorable) < len(refs) else refs
+
+    def _outcome_is_continuous(self) -> bool:
+        """结局项全是量表/矩阵行时按连续取值构造，否则按二分类切分。"""
+        if not self.outcome_refs:
+            return False
+        return all(self._ref_scorable(ref) for ref in self.outcome_refs)
+
+    def _ref_scorable(self, ref: int) -> bool:
+        question, row = split_ref(ref)
+        try:
+            item = self.survey.item(question)
+        except KeyError:
+            return False
+        if row:
+            return item.kind is ItemKind.MATRIX and 1 <= row <= item.row_count
+        return item.kind is ItemKind.SCALE or self._is_likert(item)
+
+    def _resolve_dimensions(self) -> tuple[tuple[int, ...], ...]:
+        # 结局项不进信度/效度矩阵：因变量不能算进自变量的 α，这是方法学要求
+        analysis = set(self._analysis_numbers())
+        configured = [
+            [n for n in group if n in analysis] for group in self.goal.dimensions
+        ]
+        configured = [g for g in configured if g]
+        if configured:
+            # 没被任何维度覆盖的可评分项挂到最后一组，避免它们退化成纯噪声，
+            # 把 KMO 拖下去（界面上只会传一组，这里主要防手写配置漏项）
+            covered = {n for group in configured for n in group}
+            leftovers = [n for n in self._analysis_numbers() if n not in covered]
+            if leftovers:
+                configured[-1].extend(leftovers)
+            return tuple(tuple(g) for g in configured)
+
+        numbers = self._analysis_numbers()
         if not numbers:
             return ()
         # 默认全部算一个维度（题少时这样最能凑出 α）
@@ -170,6 +237,10 @@ class GoalSolver:
             for row in range(1, item.row_count + 1):
                 numbers.append(item.number * 100 + row)
         return numbers
+
+    def _analysis_numbers(self) -> list[int]:
+        """参与 α / KMO 的项目：可评分项里去掉结局项。"""
+        return [n for n in self._all_scorable() if n not in self.outcome_numbers]
 
     def _is_scorable(self, number: int) -> bool:
         return number in set(self._all_scorable())
@@ -199,8 +270,6 @@ class GoalSolver:
 
         for attempt in range(1, max(1, self.goal.attempts) + 1):
             sheets = self._build(count, attempt, alpha_scale, beta_map)
-            if self.goal.wants_conclusion:
-                sheets = self._rebalance_outcome(sheets, beta_map)
             report = self._measure(sheets, attempt)
 
             if best is None or self._score(report) < self._score(best[1]):
@@ -215,15 +284,20 @@ class GoalSolver:
                 else:
                     high_scale = alpha_scale
                 alpha_scale = (low_scale + high_scale) / 2.0
-            # 谁不显著就把谁的权重调大（方向不变），逐个处理
-            for item in report.predictors:
-                if item.ok:
-                    continue
+            # 谁不显著就把谁的权重调大（方向不变），逐个处理。
+            # 幅度取 1.4 而不是 1.8：调太猛会让另一个自变量掉出显著区，
+            # 两个方向交替震荡，永远收敛不到「都显著」。
+            failed = [p for p in report.predictors if not p.ok]
+            if len(failed) < len(report.predictors):
+                for item in report.predictors:
+                    if item.ok and item.expected != "0":
+                        beta_map[item.number] = beta_map.get(item.number, 0.8) * 0.95
+            for item in failed:
                 current = beta_map.get(item.number, 0.8)
                 if item.expected == "0":
                     beta_map[item.number] = current * 0.3
                 else:
-                    beta_map[item.number] = current * 1.8
+                    beta_map[item.number] = current * 1.4
                 if abs(beta_map[item.number]) > 6.0:
                     beta_map[item.number] = 6.0 * (1 if beta_map[item.number] > 0 else -1)
 
@@ -247,6 +321,9 @@ class GoalSolver:
 
         for unit in range(1, count + 1):
             sheets.append(self._build_one(unit, attempt, alpha_scale, beta_map))
+        # 结局必须在整批范围内构造：二分类要按占比切分，连续结局要按排名映射
+        if self.goal.wants_conclusion:
+            sheets = self._apply_outcome(sheets, beta_map)
         return sheets
 
     def _build_one(
@@ -261,7 +338,6 @@ class GoalSolver:
         # 最终提交到平台的数据和本地算过的完全不是一批。
         base = generate_sheet(self.survey, self.strategy, self.seed, unit, latent=0.55)
         answers: dict[int, ItemAnswer] = dict(base.answers)
-        scores: dict[int, float] = {}
 
         for index, group in enumerate(self.dimensions):
             k = len(group)
@@ -272,14 +348,7 @@ class GoalSolver:
                     item_no, row_no = divmod(number, 100)
                     item = self.survey.item(item_no)
                     picked = _scale_index(z, item.option_count or 5)
-                    pairs = dict(answers[item_no].matrix) if item_no in answers else {}
-                    pairs[row_no] = picked
-                    answers[item_no] = ItemAnswer(
-                        number=item_no,
-                        picks=tuple(sorted(pairs.values())),
-                        matrix=tuple(sorted(pairs.items())),
-                    )
-                    scores[number] = float(picked)
+                    answers[item_no] = _merge_matrix(answers.get(item_no), item_no, row_no, picked)
                     continue
                 item = self.survey.item(number)
                 picked = _scale_index(z, item.option_count or 5)
@@ -288,12 +357,8 @@ class GoalSolver:
                 answers[number] = ItemAnswer(
                     number=number, picks=(picked,), scale=float(picked)
                 )
-                scores[number] = float(picked)
 
-        sheet = AnswerSheet(seed=self.seed, unit=unit, answers=answers)
-        if self.goal.wants_conclusion:
-            sheet = self._apply_outcome(sheet, scores, unit, attempt, beta_map)
-        return sheet
+        return AnswerSheet(seed=self.seed, unit=unit, answers=answers)
 
     def _draw_factors(self, rng: random.Random) -> list[float]:
         noise = [rng.gauss(0.0, 1.0) for _ in range(self.goal.dimension_count)]
@@ -316,48 +381,104 @@ class GoalSolver:
         return self.survey.item(item_no).option_count or 5
 
     def _apply_outcome(
-        self,
-        sheet: AnswerSheet,
-        scores: dict[int, float],
-        unit: int,
-        attempt: int,
-        beta_map: dict[int, float],
-    ) -> AnswerSheet:
-        # 结局题本身是量表/矩阵行时，它已经有连续取值：
-        # 一旦覆盖成「正面/非正面」两档，α 和 KMO 就会被压垮，所以保持原值。
-        if self.goal.outcome_question in self._all_scorable():
-            return sheet
+        self, sheets: list[AnswerSheet], beta_map: dict[int, float]
+    ) -> list[AnswerSheet]:
+        """结局构造的统一入口：连续结局走保序重排，二分类走占比切分。"""
+        if not self.outcome_refs or not sheets:
+            return sheets
+        if self.outcome_continuous:
+            return self._apply_continuous(sheets, beta_map)
+        return self._apply_binary(sheets, beta_map)
 
-        item = self.survey.item(self.goal.outcome_question)
+    def _apply_binary(
+        self, sheets: list[AnswerSheet], beta_map: dict[int, float]
+    ) -> list[AnswerSheet]:
+        """单选结局：按综合得分排序，前 rate 比例拿「正面」选项，占比严格可控。"""
+        question, _ = split_ref(self.outcome_refs[0])
+        try:
+            item = self.survey.item(question)
+        except KeyError:
+            return sheets
         options = list(range(1, (item.option_count or 2) + 1))
-        positives = [o for o in self.goal.positive_options if o in options] or [options[-1]]
+        positives = list(self.outcome_positives) or [options[-1]]
+        others = [o for o in options if o not in positives] or [options[0]]
 
-        # 综合得分：按方向给权重，正负号决定相关性方向
-        total = 0.0
-        for number in self.goal.predictors:
-            value = scores.get(number)
-            if value is None:
-                continue
-            span = max(1.0, float(self._option_count(number)) - 1.0)
-            normalized = (value - 1.0) / span * 2.0 - 1.0
-            weight = beta_map.get(number, 0.8)
-            if self.goal.direction_of(number) == "0":
-                weight = 0.0
-            total += weight * normalized
-
-        rng = derive(self.seed, "outcome", unit)
-        total += rng.gauss(0.0, 0.35)
-
-        # 按事件占比切分：这条只决定"正面/非正面"，方向由权重符号保证
-        positive = total > self._outcome_threshold()
-        chosen = positives[0] if positive else next(
-            (o for o in options if o not in positives), options[0]
+        rate = min(0.9, max(0.1, float(self.goal.event_rate)))
+        winners_n = max(1, min(len(sheets), round(rate * len(sheets))))
+        order = sorted(
+            range(len(sheets)), key=lambda i: self._rescore(sheets[i], beta_map), reverse=True
         )
+        winners = set(order[:winners_n])
+
+        result: list[AnswerSheet] = []
+        for index, sheet in enumerate(sheets):
+            chosen = positives[0] if index in winners else others[index % len(others)]
+            result.append(self._set_value(sheet, question, 0, chosen))
+        return result
+
+    def _apply_continuous(
+        self, sheets: list[AnswerSheet], beta_map: dict[int, float]
+    ) -> list[AnswerSheet]:
+        """量表 / 矩阵行结局：按综合得分排名映射回 1..n 档位（保序重排）。
+
+        直接覆盖成 0/1 会把 Likert 压成两档，α 与 KMO 一起崩；保序重排只重排、
+        不改变分布形状，结局仍是连续量表，方向由排名决定。每个项目加一点抖动，
+        避免矩阵的多行完全一样（那样会被当成直线作答）。
+        """
+        scores = [self._rescore(sheet, beta_map) for sheet in sheets]
+        order = sorted(range(len(sheets)), key=lambda i: scores[i])
+        total = max(1, len(order))
+        # 单项结局抖动要小（保住分位分布）；多项合成时抖动要大一点，
+        # 否则同一人的几行完全一样，会被当成直线作答剔除
+        spread = 0.18 if len(self.outcome_refs) > 1 else 0.06
+        result = list(sheets)
+        for rank, index in enumerate(order):
+            base = (rank + 0.5) / total
+            for ref in self.outcome_refs:
+                jitter = derive(self.seed, "outcome", result[index].unit, ref).gauss(0.0, spread)
+                frac = min(0.999, max(0.001, base + jitter))
+                level = _option_from_fraction(frac, self._option_count(ref))
+                question, row = split_ref(ref)
+                result[index] = self._set_value(result[index], question, row, level)
+        return result
+
+    def _set_value(
+        self, sheet: AnswerSheet, question: int, row: int, value: int
+    ) -> AnswerSheet:
+        """把一个取值写进答卷：row=0 写整题，否则合并进矩阵的对应行。"""
         answers = dict(sheet.answers)
-        answers[item.number] = ItemAnswer(
-            number=item.number, picks=(chosen,), scale=float(chosen)
-        )
+        if row:
+            answers[question] = _merge_matrix(answers.get(question), question, row, value)
+        else:
+            answers[question] = ItemAnswer(
+                number=question, picks=(int(value),), scale=float(value)
+            )
         return AnswerSheet(seed=sheet.seed, unit=sheet.unit, answers=answers)
+
+    def _outcome_value(self, sheet: AnswerSheet, numbers: list[int]) -> float | None:
+        """取一份答卷的结局值：连续取（多项目）均值，二分类取 0/1。"""
+        if self.outcome_continuous:
+            values = [self._value_of(sheet, ref, numbers) for ref in self.outcome_refs]
+            usable = [v for v in values if v is not None]
+            if not usable:
+                return None
+            return sum(usable) / len(usable)
+        question, _ = split_ref(self.outcome_refs[0])
+        answer = sheet.get(question)
+        picked = answer.picks[0] if answer and answer.picks else 0
+        return 1.0 if picked in set(self.outcome_positives) else 0.0
+
+    def _resolve_positives(self) -> tuple[int, ...]:
+        """二分类结局的「正面」选项；没配就退回最后一个（与旧行为一致）。"""
+        if self.outcome_continuous or not self.outcome_refs:
+            return ()
+        try:
+            item = self.survey.item(split_ref(self.outcome_refs[0])[0])
+        except KeyError:
+            return ()
+        options = list(range(1, (item.option_count or 2) + 1))
+        picked = [o for o in self.outcome.positive if o in options]
+        return tuple(picked or [options[-1]])
 
     def _rescore(self, sheet: AnswerSheet, beta_map: dict[int, float] | None = None) -> float:
         """按自变量算综合得分（越大越偏「正面结局」）。矩阵行同样参与。"""
@@ -375,44 +496,11 @@ class GoalSolver:
             total += weight * normalized
         return total
 
-    def _rebalance_outcome(
-        self, sheets: list[AnswerSheet], beta_map: dict[int, float] | None = None
-    ) -> list[AnswerSheet]:
-        """按得分排序决定谁拿到「正面结局」，让事件占比严格等于设定值。"""
-        if self.goal.outcome_question in self._all_scorable():
-            return sheets
-
-        item = self.survey.item(self.goal.outcome_question)
-        options = list(range(1, (item.option_count or 2) + 1))
-        positives = [o for o in self.goal.positive_options if o in options] or [options[-1]]
-        others = [o for o in options if o not in positives] or [options[0]]
-
-        rate = min(0.9, max(0.1, float(self.goal.event_rate)))
-        count = max(1, min(len(sheets), round(rate * len(sheets))))
-        order = sorted(
-            range(len(sheets)), key=lambda i: self._rescore(sheets[i], beta_map), reverse=True
-        )
-        winners = set(order[:count])
-
-        result: list[AnswerSheet] = []
-        for index, sheet in enumerate(sheets):
-            chosen = positives[0] if index in winners else others[index % len(others)]
-            answers = dict(sheet.answers)
-            answers[item.number] = ItemAnswer(
-                number=item.number, picks=(chosen,), scale=float(chosen)
-            )
-            result.append(AnswerSheet(seed=sheet.seed, unit=sheet.unit, answers=answers))
-        return result
-
-    def _outcome_threshold(self) -> float:
-        rate = min(0.9, max(0.1, float(self.goal.event_rate)))
-        # 标准正态分位点：让正面结局约占 rate
-        return math.sqrt(2.0) * _erfinv(2.0 * (1.0 - rate) - 1.0)
-
     # -- 实测 ---------------------------------------------------------------
 
     def _measure(self, sheets: list[AnswerSheet], attempt: int) -> GoalReport:
-        numbers = self._all_scorable()
+        # 信度/效度只算自变量侧项目：因变量混进去会把 α 抬高，方法上不成立
+        numbers = self._analysis_numbers()
         matrix: list[list[float]] = []
         for sheet in sheets:
             row: list[float] = []
@@ -440,12 +528,7 @@ class GoalSolver:
         predictor_results: list[PredictorResult] = []
         significant = 0
         if self.goal.wants_conclusion:
-            positives = set(self.goal.positive_options)
-            outcome = []
-            for sheet in sheets:
-                answer = sheet.get(self.goal.outcome_question)
-                picked = answer.picks[0] if answer and answer.picks else 0
-                outcome.append(1.0 if picked in positives else 0.0)
+            outcome = [self._outcome_value(sheet, numbers) or 0.0 for sheet in sheets]
 
             for number in self.goal.predictors:
                 values = [self._value_of(sheet, number, numbers) or 1.0 for sheet in sheets]
@@ -474,6 +557,16 @@ class GoalSolver:
             notes.append(f"α={alpha:.2f} 低于目标 {self.goal.alpha_target:.2f}")
         if kmo_value and kmo_value < self.goal.kmo_target:
             notes.append(f"KMO={kmo_value:.2f} 低于目标 {self.goal.kmo_target:.2f}")
+        if self.outcome_mixed:
+            notes.append("结局项里混有连续项与二分类项，已只用连续项参与构造")
+
+        need = self._need_significant()
+        if self.goal.wants_conclusion and significant < need and len(sheets) < 80:
+            notes.append(
+                f"{len(sheets)} 份只让 {significant}/{len(self.goal.predictors)} 项显著；"
+                f"要让 {need} 项同时显著，建议份数 ≥ 80"
+                "（反向自变量之间会互相抵消，小样本下统计功效不足）"
+            )
 
         achieved = bool(
             (not alphas or (self.goal.alpha_target - 0.02 <= alpha <= self.goal.alpha_target + 0.04))

@@ -53,6 +53,28 @@ _DOCS: dict[str, Any] = {
         "enabled": {"type": "bool", "desc": "是否启用"},
         "targets": {"type": "object", "desc": "{题号: {选项序号: 占比}}"},
     }},
+    "goal": {"type": "object", "desc": "数据目标：信效度 + 结论（因变量与影响因素）", "fields": {
+        "enabled": {"type": "bool", "desc": "是否按目标构造，而不是纯随机"},
+        "alpha_target": {"type": "float", "desc": "目标 Cronbach α，逐维度保证"},
+        "kmo_target": {"type": "float", "desc": "目标 KMO"},
+        "dimensions": {"type": "list[list[int]]",
+                       "desc": "维度分组；项目编号见 goal.outcome_items 的说明。留空=全部可评分项一组"},
+        "reverse": {"type": "list[int]", "desc": "反向计分的项目编号"},
+        "dimension_correlation": {"type": "float", "desc": "维度间相关，影响 KMO"},
+        "outcome_items": {"type": "list[int]",
+                          "desc": "因变量项目：题号；矩阵行用 题号*100+行号（第5题第3行=503）；"
+                                  "多个项目=多维构念，按 outcome_aggregate 合成"},
+        "outcome_aggregate": {"type": "str", "enum": ["single", "mean"],
+                              "desc": "single=单题/单行；mean=多项目取均值"},
+        "outcome_question": {"type": "int", "desc": "旧字段，等于 outcome_items 首项的题号，读旧方案时自动迁移"},
+        "positive_options": {"type": "list[int]",
+                             "desc": "只有单选题结局才用：哪些选项算「正面」（记 1，其余记 0）"},
+        "predictors": {"type": "list[int]", "desc": "自变量项目编号（量表题或矩阵行）"},
+        "directions": {"type": "object", "desc": "{项目编号: \"+\" 正向 / \"-\" 负向 / \"0\" 故意不显著}"},
+        "significant_required": {"type": "int", "desc": "至少几项要显著"},
+        "event_rate": {"type": "float", "desc": "二分类结局里「正面」的占比，0~1"},
+        "attempts": {"type": "int", "desc": "最多重算几次来找达标组合"},
+    }},
     "item_rule": {"type": "object", "desc": "单题规则", "fields": {
         "weights": {"type": "list[float]", "desc": "各选项权重，不必归一化"},
         "skew": {"type": "object", "desc": "形状倾向", "fields": {
@@ -77,6 +99,9 @@ def schema() -> dict[str, Any]:
             "items 的键是题号字符串，例如 \"3\"。",
             "skew.shape 只对选择题与量表题生效；weights 非空时以 weights 为准。",
             "targets.enabled=true 时，程序会按每 20 份做一次诊断并自动调整生成参数。",
-            "seal_mode 需要在完成一次抓包标定后再改，默认 none。",
+            "seal_mode 需要在完成一次抓包标定后再改，默认 xor_ktimes。",
+            "goal.outcome_items 用项目编号：题号，或 题号*100+行号（矩阵行）。"
+            "整道矩阵不能当结局——结局必须收成一个数，用单行或 outcome_aggregate=mean 合成。",
+            "结局项会自动排除在 α / KMO 之外（因变量不计入自变量量表的信度）。",
         ],
     }

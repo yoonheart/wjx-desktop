@@ -79,6 +79,7 @@
             kmo: ($('goalKmo') || {}).value || '0.75',
             sig: ($('goalSig') || {}).value || '0',
             outcome: ($('goalOutcome') || {}).value || '',
+            mean: Boolean(($('goalOutcomeMean') || {}).checked),
             positive: ($('goalPositive') || {}).value || '',
             factors: factors,
             goal: data || null
@@ -116,6 +117,11 @@
         set('goalAlpha', state.alpha);
         set('goalKmo', state.kmo);
         set('goalSig', state.sig);
+        // 先还原「合成」勾选，再触发结局变更：onchange 里会重新应用可见性
+        const meanBox = $('goalOutcomeMean');
+        if (meanBox) {
+            meanBox.checked = Boolean(state.mean);
+        }
         if (state.outcome) {
             const outcome = $('goalOutcome');
             if (outcome) {
@@ -226,6 +232,50 @@
         return list.map(function (q) { return q.id; }).join(',');
     }
 
+    /** 当前选中的结局：可能是整题，也可能是矩阵的某一行。 */
+    function selectedOutcome() {
+        const value = ($('goalOutcome') || {}).value || '';
+        if (!value) {
+            return null;
+        }
+        const list = questions();
+        for (let i = 0; i < list.length; i += 1) {
+            const q = list[i];
+            if (q.isMatrix) {
+                const row = q.rows.filter(function (r) { return r.key === value; })[0];
+                if (row) {
+                    // 矩阵行与量表都是连续取值；只有普通单选题才做二分类
+                    return { question: q, row: row, value: value, continuous: true };
+                }
+            } else if (q.id === value) {
+                return {
+                    question: q,
+                    row: null,
+                    value: value,
+                    continuous: q.type.indexOf('量表') >= 0
+                };
+            }
+        }
+        return null;
+    }
+
+    /** 结局项目编号列表：勾了「合并整题各行」就把该矩阵的每一行都算进来。 */
+    function outcomeItems() {
+        const picked = selectedOutcome();
+        if (!picked) {
+            return [];
+        }
+        const mean = Boolean(($('goalOutcomeMean') || {}).checked);
+        if (picked.row && mean) {
+            return picked.question.rows.map(function (r) { return Number(r.key); });
+        }
+        return [Number(picked.value)];
+    }
+
+    function outcomeAggregate() {
+        return outcomeItems().length > 1 ? 'mean' : 'single';
+    }
+
     function fillSelect(select, items, placeholder) {
         if (!select) {
             return;
@@ -251,13 +301,24 @@
         }
         lastSignature = sig;
 
-        // 结局题只能是单选题或量表题（多选/矩阵/排序/填空没有单一取值）
-        const outcomeItems = list.filter(function (q) {
-            return q.type.indexOf('单选题') >= 0 || q.type.indexOf('量表') >= 0;
+        // 结局可以是：单选题、量表题，或矩阵题的任意一行
+        // （整道矩阵不行——一题多行=多个变量，结局必须收成一个数）
+        const outcomeItems = [];
+        list.forEach(function (q) {
+            if (q.isMatrix) {
+                q.rows.forEach(function (row) {
+                    outcomeItems.push({
+                        value: row.key,
+                        label: '第' + q.id + '题(' + row.label + ')'
+                    });
+                });
+                return;
+            }
+            if (q.type.indexOf('单选题') >= 0 || q.type.indexOf('量表') >= 0) {
+                outcomeItems.push({ value: q.id, label: '第' + q.id + '题 ' + q.title });
+            }
         });
-        fillSelect($('goalOutcome'), outcomeItems.map(function (q) {
-            return { value: q.id, label: '第' + q.id + '题 ' + q.title };
-        }), '请选择题目');
+        fillSelect($('goalOutcome'), outcomeItems, '请选择题目');
 
         // 结局题没选时，正面选项也要有占位符
         fillSelect($('goalPositive'), [], '请选择选项');
@@ -288,17 +349,27 @@
         const outcome = $('goalOutcome');
         if (outcome) {
             outcome.onchange = function () {
-                const picked = list.filter(function (q) { return q.id === outcome.value; })[0];
+                const picked = selectedOutcome();
                 const previous = ($('goalPositive') || {}).value || '';
-                fillSelect($('goalPositive'), (picked ? picked.options : []).map(function (text, index) {
+                const options = picked && !picked.row ? picked.question.options : [];
+                fillSelect($('goalPositive'), options.map(function (text, index) {
                     return { value: index + 1, label: (index + 1) + '.' + (text || '选项') };
                 }), '请选择选项');
                 const positive = $('goalPositive');
                 if (positive && previous) {
                     positive.value = previous;
                 }
+                applyOutcomeMode();
                 sync();
             };
+        }
+
+        const meanBox = $('goalOutcomeMean');
+        if (meanBox) {
+            meanBox.addEventListener('change', function () {
+                applyOutcomeMode();
+                sync();
+            });
         }
 
         ['goalEnabled', 'goalAlpha', 'goalKmo', 'goalSig'].forEach(function (id) {
@@ -313,7 +384,44 @@
         if (toggle) {
             toggle.addEventListener('change', toggleBody);
         }
+        applyOutcomeMode();
         toggleBody();
+    }
+
+    /** 按结局类型切换可见控件：连续结局不需要「算作正面」，矩阵行才给「合并各行」。 */
+    function applyOutcomeMode() {
+        const picked = selectedOutcome();
+        const positiveGroup = $('goalPositiveGroup');
+        const meanLabel = $('goalOutcomeMeanLabel');
+        const meanBox = $('goalOutcomeMean');
+        const continuous = Boolean(picked && picked.continuous);
+        if (positiveGroup) {
+            positiveGroup.classList.toggle('is-hidden', continuous);
+        }
+        if (meanLabel) {
+            meanLabel.classList.toggle('is-hidden', !(picked && picked.row));
+        }
+        if (continuous && meanBox) {
+            // 单选题没有「行」的概念，避免留下一个勾着的孤儿状态
+            if (!picked.row) {
+                meanBox.checked = false;
+            }
+        }
+
+        // 结局项不能同时当自变量（自己解释自己没有意义），直接禁用该行
+        const used = {};
+        outcomeItems().forEach(function (n) { used[String(n)] = true; });
+        document.querySelectorAll('#goalFactors input[data-qid]').forEach(function (box) {
+            const blocked = Boolean(used[box.dataset.qid]);
+            if (blocked) {
+                box.checked = false;
+            }
+            box.disabled = blocked;
+            const row = box.closest('label');
+            if (row) {
+                row.style.opacity = blocked ? '0.45' : '';
+            }
+        });
     }
 
     /** 一行因素：勾选框 + 标签 + 方向。 */
@@ -337,14 +445,22 @@
         const alpha = parseFloat(($('goalAlpha') || {}).value) || 0.85;
         const kmo = parseFloat(($('goalKmo') || {}).value) || 0.70;
         const sig = parseInt(($('goalSig') || {}).value, 10) || 0;
-        const outcomeQ = ($('goalOutcome') || {}).value || '';
+        const items = outcomeItems();
+        const picked = selectedOutcome();
         const positiveIdx = parseInt(($('goalPositive') || {}).value, 10) || 1;
 
+        // 结局项不进维度：因变量不能算进自变量的 α
+        const exclude = {};
+        items.forEach(function (n) { exclude[n] = true; });
         const scaleIds = [];
         questions().forEach(function (q) {
             if (q.isMatrix) {
-                q.rows.forEach(function (row) { scaleIds.push(Number(row.key)); });
-            } else if (q.type.indexOf('量表') >= 0) {
+                q.rows.forEach(function (row) {
+                    if (!exclude[Number(row.key)]) {
+                        scaleIds.push(Number(row.key));
+                    }
+                });
+            } else if (q.type.indexOf('量表') >= 0 && !exclude[Number(q.id)]) {
                 scaleIds.push(parseInt(q.id, 10));
             }
         });
@@ -373,12 +489,13 @@
                 }
             }
         };
+        const legacyQuestion = items.length ? Math.floor(items[0] / 100) : 0;
         shim('validitySwitch', enabled);
         shim('validityTarget', alpha.toFixed(2));
         shim('validityDimensions', dimensions.map(function (g) { return g.join('-'); }).join(';'));
         shim('validityReverse', '');
-        shim('synthSwitch', enabled && outcomeQ && predictors.length > 0);
-        shim('synthOutcomeQ', outcomeQ);
+        shim('synthSwitch', enabled && items.length > 0 && predictors.length > 0);
+        shim('synthOutcomeQ', legacyQuestion);
         shim('synthPositive', positiveIdx - 1);
         shim('synthPredictors', predictors.join(','));
         shim('synthEffects', predictors.map(function (q) {
@@ -391,9 +508,15 @@
 
         const summary = $('goalSummary');
         if (summary) {
+            let outcomeText = ' · 未选结局题';
+            if (picked) {
+                outcomeText = ' · 结局第' + picked.question.id + '题'
+                    + (picked.row ? '(' + picked.row.label + ')' : '')
+                    + (items.length > 1 ? '（' + items.length + ' 行均值）' : '');
+            }
             summary.textContent = enabled
                 ? 'α ' + alpha.toFixed(2) + ' · KMO ' + kmo.toFixed(2)
-                    + (outcomeQ ? ' · 结局题第' + outcomeQ + '题' : ' · 未选结局题')
+                    + outcomeText
                     + ' · 因素 ' + predictors.length + ' 个'
                 : '';
         }
@@ -402,13 +525,15 @@
         if (hint) {
             if (!enabled) {
                 hint.textContent = '未开启：按普通随机方式填写。';
-            } else if (!outcomeQ) {
+            } else if (!items.length) {
                 hint.textContent = '已开启：请选择结局题（不选则只保证信度，不构造结论）。';
             } else if (!predictors.length) {
                 hint.textContent = '已开启：请勾选至少一个影响因素。';
             } else {
-                hint.textContent = '已开启：量表按 α=' + alpha.toFixed(2) + ' 生成，'
-                    + predictors.length + ' 个影响因素按设定方向构造，至少 ' + sig + ' 项显著。';
+                const kind = picked && picked.continuous ? '连续（保序构造）' : '二分类（按占比切分）';
+                hint.textContent = '已开启：量表按 α=' + alpha.toFixed(2) + ' 生成，结局按'
+                    + kind + '，' + predictors.length + ' 个影响因素按设定方向构造，至少 '
+                    + sig + ' 项显著。';
             }
         }
     }
@@ -419,12 +544,19 @@
         if (!enabled) {
             return null;
         }
-        const list = questions();
+        const items = outcomeItems();
+        const exclude = {};
+        items.forEach(function (n) { exclude[n] = true; });
+
         const scorable = [];
-        list.forEach(function (q) {
+        questions().forEach(function (q) {
             if (q.isMatrix) {
-                q.rows.forEach(function (row) { scorable.push(Number(row.key)); });
-            } else if (q.type.indexOf('量表') >= 0) {
+                q.rows.forEach(function (row) {
+                    if (!exclude[Number(row.key)]) {
+                        scorable.push(Number(row.key));
+                    }
+                });
+            } else if (q.type.indexOf('量表') >= 0 && !exclude[Number(q.id)]) {
                 scorable.push(Number(q.id));
             }
         });
@@ -442,6 +574,8 @@
             directions[qid] = (document.querySelector('#goalFactors select[data-dir="' + qid + '"]') || {}).value || '+';
         });
 
+        const picked = selectedOutcome();
+        const positiveRaw = parseInt(($('goalPositive') || {}).value, 10) || 0;
         return {
             enabled: true,
             alpha_target: parseFloat(($('goalAlpha') || {}).value) || 0.85,
@@ -449,9 +583,12 @@
             reverse: [],
             dimension_correlation: 0.45,
             kmo_target: parseFloat(($('goalKmo') || {}).value) || 0.70,
-            outcome_question: parseInt(($('goalOutcome') || {}).value, 10) || 0,
-            positive_options: (parseInt(($('goalPositive') || {}).value, 10) || 1)
-                ? [parseInt(($('goalPositive') || {}).value, 10) || 1] : [],
+            // 新字段：结局项目（可含矩阵行、可多项目合成）
+            outcome_items: items,
+            outcome_aggregate: outcomeAggregate(),
+            // 旧字段保留：其它模块只想知道「结局是哪道题」
+            outcome_question: picked ? parseInt(picked.question.id, 10) : 0,
+            positive_options: positiveRaw ? [positiveRaw] : [],
             predictors: predictors,
             directions: directions,
             significant_required: parseInt(($('goalSig') || {}).value, 10) || 0,
@@ -461,7 +598,13 @@
     }
 
     /** 结果页的体检报告。 */
+    /** 已按需求关闭：停止后不再展示信效度/体检信息。 */
     async function showGoalReport(taskId) {
+        showGoalReportDisabled(taskId);
+    }
+
+    async function showGoalReportDisabled(taskId) {
+        return;
         try {
             const response = await fetch('/api/tasks/' + encodeURIComponent(taskId));
             const body = await response.json();

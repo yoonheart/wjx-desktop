@@ -20,7 +20,7 @@ from typing import Any, Mapping
 from wjxdesk.domain.goal import ResearchGoal
 from wjxdesk.domain.enums import ItemKind, PacingProfile, SkewShape
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 
 # 提交时刻的自然分布权重（0 点 → 23 点）。凌晨极低，上午与晚间为双峰。
 DEFAULT_HOUR_WEIGHTS: tuple[float, ...] = (
@@ -524,10 +524,21 @@ def _synth(raw: Any) -> SynthesisConfig:
 
 def _migrate(data: dict[str, Any], version: int) -> dict[str, Any]:
     """旧版本配置迁移链。新增版本时在这里追加一步。"""
-    if version in (0, CONFIG_VERSION):
+    if version >= CONFIG_VERSION:
         return data
+
     migrated = dict(data)
-    # 示例：未来版本从 1 → 2 时在此补充字段改名
+    if version < 2:
+        # v1 → v2：结局从「一个题号」升级为 outcome_items（支持矩阵行与多项目合成）。
+        # 只做字段搬运，不动其它结构；老文件读进来行为与以前一致。
+        goal = migrated.get("goal")
+        if isinstance(goal, Mapping):
+            goal = dict(goal)
+            if not goal.get("outcome_items") and goal.get("outcome_question"):
+                goal["outcome_items"] = [int(goal["outcome_question"])]
+                goal.setdefault("outcome_aggregate", "single")
+            migrated["goal"] = goal
+    migrated["version"] = CONFIG_VERSION
     return migrated
 
 

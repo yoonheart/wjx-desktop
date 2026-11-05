@@ -1071,13 +1071,13 @@ function saveSettings() {
                 let value = parseInt(this.value);
                 if (isNaN(value)) {
                     value = 1;
-                    showAlert('请输入有效的数字，份数应在1~1000之间', 'error');
+                    showAlert('请输入有效的数字，份数应在1~9999之间', 'error');
                 } else if (value < 1) {
                     value = 1;
-                    showAlert('份数应在1~1000之间', 'error');
-                } else if (value > 1000) {
-                    value = 1000;
-                    showAlert('份数应在1~1000之间', 'error');
+                    showAlert('份数应在1~9999之间', 'error');
+                } else if (value > 9999) {
+                    value = 9999;
+                    showAlert('份数应在1~9999之间', 'error');
                 }
                 this.value = value;
             });
@@ -2692,7 +2692,7 @@ async function exportQuestionConfig() {
     }
 
     const targetCountForExport = targetInput
-        ? Math.min(1000, Math.max(1, parseInt(targetInput.value, 10) || 1))
+        ? Math.min(9999, Math.max(1, parseInt(targetInput.value, 10) || 1))
         : 1;
 
     const payload = {
@@ -3754,7 +3754,7 @@ async function importQuestionConfig() {
     const targetInput = document.getElementById('targetCount');
     let restoredCount = 0;
     if (targetInput && Number.isFinite(Number(data.targetCount)) && Number(data.targetCount) > 0) {
-        restoredCount = Math.min(1000, Math.max(1, parseInt(data.targetCount, 10)));
+        restoredCount = Math.min(9999, Math.max(1, parseInt(data.targetCount, 10)));
         targetInput.value = restoredCount;
         targetInput.dispatchEvent(new Event('change'));
     }
@@ -4507,7 +4507,7 @@ function buildConfigGuide() {
             "seedSearch": "最多重试多少批，默认 80，够用。"
         },
         "settings 字段说明": {
-            "targetCount": "目标份数（整数，1~1000）",
+            "targetCount": "目标份数（整数，1~9999）",
             "speedMultiplier": "倍速，只能填 2 / 4 / 6",
             "timeControlSwitch": "是否控制单份填写时长（true/false）",
             "minFillTime": "填写时长下限，单位秒，字符串，10~360",
@@ -4591,6 +4591,7 @@ function showStopReasons(taskId) {
         LIMIT: '达到次数或份数上限',
         THROTTLED: '触发频率限制',
         EXIT_UNUSABLE: '出口（代理）不可用或已用完',
+        PROXY_AUTH: '代理要求认证（请改白名单模式或提供账号密码）',
         NETWORK: '网络错误',
         FORMAT: '页面结构变化，解析失败',
         UNKNOWN: '结果无法确认'
@@ -5189,7 +5190,8 @@ function startProgressMonitoring(taskId) {
                 stopBtn.onclick = restoreAfterTaskEnd;
                 // 任务停了就把原因摊开：后端已记录每份的结果，这里只做展示
                 showStopReasons(currentTaskId);
-                showGoalReport(currentTaskId);
+                // 需求变更：停止后不再展示「数据目标体检」面板
+        // showGoalReport(currentTaskId);
             }
         } catch (e) {
             console.error('解析进度数据失败:', e);
@@ -5247,7 +5249,8 @@ function applyRemainingTarget() {
     const doneEl = document.getElementById('completedCount');
     const done = doneEl ? (parseInt(doneEl.textContent, 10) || 0) : 0;
     const remaining = Math.max(0, target - done);
-    if (target > 0 && remaining !== target) {
+    // 已经刷满就不要写 0：0 份没有意义，输入框也不接受
+    if (target > 0 && remaining > 0 && remaining !== target) {
         input.value = String(remaining);
         input.dispatchEvent(new Event('change'));
     }
@@ -5272,6 +5275,9 @@ function stopTask() {
 
 // 任务结束（失败/停止）后点击"返回配置"恢复界面
 function restoreAfterTaskEnd() {
+    // 任务因出错/验证等原因自己停下时，同样要把目标份数改成「还差多少份」，
+    // 否则用户点「返回配置」还得自己算已经刷了多少。
+    applyRemainingTarget();
     setVisible('progressPanel', false);
     setVisible('analysisContent', true);
     setVisible('brushBtn', true);

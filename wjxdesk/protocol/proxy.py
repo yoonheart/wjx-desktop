@@ -28,6 +28,8 @@ class Exit:
     port: int = 0
     username: str = ""
     password: str = ""
+    # 到期时间（epoch 秒）。0 表示未知，由池子按默认有效期补
+    expires_at: float = 0.0
 
     @property
     def addr(self) -> str:
@@ -49,9 +51,66 @@ class Exit:
         return f"http://{self.proxy}"
 
     @classmethod
+    def _parse_json(cls, text: str) -> "Exit | None":
+        """从 JSON 返回里取出 IP:端口，并读取 deadline（有效期）。"""
+        import datetime as _dt
+        import json as _json
+        import re as _re
+
+        try:
+            payload = _json.loads(text)
+        except Exception:
+            payload = None
+
+        server = ""
+        deadline = ""
+        if isinstance(payload, dict):
+            items = payload.get("data")
+            if isinstance(items, list) and items and isinstance(items[0], dict):
+                item = items[0]
+                server = str(item.get("server") or "")
+                deadline = str(item.get("deadline") or "")
+                if not server and item.get("proxy_ip"):
+                    port = item.get("port") or item.get("proxy_port") or ""
+                    server = f"{item.get('proxy_ip')}:{port}" if port else str(item.get("proxy_ip"))
+        if not server:
+            # 兜底：直接从文本里抠 "server":"x.x.x.x:port"
+            found = _re.search(r'"(?:server|proxy|addr)"\s*:\s*"([^"]+)"', text)
+            if found:
+                server = found.group(1)
+
+        if not server:
+            return None
+
+        base = cls.parse(server) if not server.startswith("{") else None
+        if base is None:
+            return None
+
+        if deadline:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    moment = _dt.datetime.strptime(deadline.strip(), fmt)
+                    return Exit(
+                        host=base.host,
+                        port=base.port,
+                        username=base.username,
+                        password=base.password,
+                        expires_at=moment.timestamp(),
+                    )
+                except Exception:
+                    continue
+        return base
+
+    @classmethod
     def parse(cls, line: str) -> "Exit | None":
         text = line.strip()
         if not text or text.startswith("#"):
+            return None
+        # JSON 形式的返回（例如 {"data":[{"server":"1.2.3.4:8080","deadline":"..."}]}）
+        if text.startswith("{") or text.startswith("["):
+            parsed = cls._parse_json(text)
+            if parsed is not None:
+                return parsed
             return None
         if text.startswith("http://") or text.startswith("https://"):
             text = text.split("://", 1)[1]
@@ -95,11 +154,65 @@ class ExitPool:
     _refill_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # 本次任务一共提取过多少个 IP，用于成本核对
     fetched_total: int = 0
+    # 本次任务最多允许提取多少个 IP（0 = 不限）。点一次「开刷」算一个任务。
+    max_fetch: int = 0
+    # 熔断：连续失败多少份就判定"代理不可用"
+    # 1~2 个失败是正常的（风控、网络抖动），连续 10 个就一定是出问题了
+    fuse_threshold: int = 10
+    consecutive_failures: int = 0
+    fused: bool = False
+    # 到期丢弃 / 失败淘汰的计数，任务结束时给用户一张账单
+    expired_total: int = 0
+    dropped_total: int = 0
+    used_total: int = 0
 
     # -- 拉取 ---------------------------------------------------------------
 
+    def budget_left(self) -> int:
+        """本次任务还能再提取多少个 IP；返回 -1 表示不限。"""
+        if self.max_fetch <= 0:
+            return -1
+        return max(0, self.max_fetch - self.fetched_total)
+
+    def note_success(self) -> None:
+        """成功一份：连续失败计数清零。"""
+        self.consecutive_failures = 0
+
+    def note_failure(self, detail: str = "") -> None:
+        """失败一份：累加；到达阈值就熔断，避免继续白买 IP。"""
+        self.consecutive_failures += 1
+        if self.fuse_threshold > 0 and self.consecutive_failures >= self.fuse_threshold and not self.fused:
+            self.fused = True
+            log.error(
+                "已连续 %d 份失败（最后一次原因：%s），判定代理不可用，停止继续提取 IP",
+                self.consecutive_failures,
+                detail or "未知",
+            )
+
+    def fuse_message(self) -> str:
+        return (
+            f"连续 {self.consecutive_failures} 份都失败，判定代理不可用，任务已停止："
+            "请检查代理链接（白名单 / 额度 / 是否返回了需要账密的 IP），"
+            "或先用「IP代理测试.bat」跑一遍再刷"
+        )
+
     async def refresh(self, timeout_s: float = 15.0) -> int:
         """从提取链接拉一批出口。链接为空时退化为直连。"""
+        # 熔断后一律不再向上游要 IP
+        if self.fused:
+            raise ExitPoolEmpty(self.fuse_message())
+
+        # 预算用尽就不要再花钱了：IP 买了用不上，等于白付
+        if self.max_fetch > 0 and self.fetched_total >= self.max_fetch:
+            log.warning(
+                "提取预算已用完（本次最多 %d 个，已提取 %d 个），不再向上游要 IP",
+                self.max_fetch, self.fetched_total,
+            )
+            raise ExitPoolEmpty(
+                f"已达到本次任务的提取上限（{self.max_fetch} 个）。"
+                "如果目标份数还没刷完，请检查代理是否可用，或重新点一次开刷（会重新计算预算）"
+            )
+
         if not self.link.strip():
             async with self._lock:
                 self._exits = [Exit(host=_DIRECT)]
@@ -116,6 +229,7 @@ class ExitPool:
         parsed = [e for e in (Exit.parse(line) for line in text.splitlines()) if e]
         async with self._lock:
             if parsed:
+                self.fetched_total += len(parsed)
                 known = {e.addr for e in self._exits}
                 fresh = [e for e in parsed if e.addr not in known]
                 if fresh:
@@ -128,10 +242,19 @@ class ExitPool:
             self._last_refresh = time.time()
             count = len(self._exits)
 
+        if not parsed and text.strip():
+            # 链接有内容但没有 IP：多半是代理商的提示语（白名单/余额/频率）
+            snippet = " ".join(text.strip().split())[:120]
+            log.warning("提取链接没有返回可用 IP，原始返回：%s", snippet)
+
         # 配了链接却一个 IP 都没解析出来：说清楚，别悄悄退回本机 IP
         if self.link.strip() and not parsed:
+            detail = ""
+            if text.strip():
+                detail = "；代理返回：" + " ".join(text.strip().split())[:100]
             raise ExitPoolEmpty(
-                "代理链接没有返回可用 IP（检查链接是否有效、是否已过期、是否需要补 time/count 参数）"
+                "代理链接没有返回可用 IP（检查是否白名单未加当前公网 IP、额度是否用完、提取是否过于频繁）"
+                + detail
             )
         return count
 
@@ -216,9 +339,11 @@ class ExitPool:
                 break
 
             before = self.size
-            # 并发补齐缺口，一次拿够
+            # 并发提取：上游对"每秒提取次数"的限制远高于本程序的并发数
+            # （例如 51 是每秒 30 次，而最高倍速才 12），串行等待只会拖慢启动。
+            # 同时并发数也做了上限，避免一次打出过多请求。
             await asyncio.gather(
-                *(self._safe_refresh() for _ in range(min(missing, 8))),
+                *(self._safe_refresh() for _ in range(min(missing, 12))),
                 return_exceptions=True,
             )
 
@@ -254,11 +379,12 @@ class ExitPool:
             return
         state = self._state.setdefault(exit_addr, _ExitState())
         if ok:
+            self.consecutive_failures = 0
             return
         state.failures += 1
         state.blocked_until = time.time() + self.cooldown_s
-        if state.failures >= 2:
-            self._exits = [e for e in self._exits if e.addr != exit_addr]
+        # 坏 IP 立刻淘汰，别占着位置再去排队
+        self._drop(exit_addr, reason="failed")
 
     async def _maybe_refill(self) -> None:
         """按最小间隔重新提取，避免把代理接口打爆。
@@ -290,6 +416,32 @@ class ExitPool:
                 state.used = 0
                 state.blocked_until = 0.0
 
+    def _drop(self, addr: str, *, reason: str) -> None:
+        """把出口从池子里彻底移除，并记一笔账。"""
+        before = len(self._exits)
+        self._exits = [e for e in self._exits if e.addr != addr]
+        if len(self._exits) != before:
+            if reason == "expired":
+                self.expired_total += 1
+            else:
+                self.dropped_total += 1
+            log.debug("淘汰出口 %s（%s），池内剩 %d 个", addr, reason, len(self._exits))
+
+    def _drop_expired(self, now: float) -> None:
+        """有效期到点的出口直接删掉，绝不再复用。"""
+        for item in list(self._exits):
+            if item.expires_at and item.expires_at <= now:
+                self._drop(item.addr, reason="expired")
+
+    def bill(self) -> str:
+        """任务结束时给用户看的一张账单。"""
+        remain = len(self._exits)
+        return (
+            f"提取 {self.fetched_total} 个 IP，用掉 {self.used_total} 个，"
+            f"过期丢弃 {self.expired_total} 个，失败淘汰 {self.dropped_total} 个，"
+            f"池内剩余 {remain} 个"
+        )
+
     async def acquire(self) -> Exit:
         now = time.time()
         async with self._lock:
@@ -299,14 +451,14 @@ class ExitPool:
                 # 未配置链接时退化为直连，避免任务因为「没填代理」而直接失败
                 self._exits = [Exit(host=_DIRECT)]
                 self._state.setdefault(_DIRECT, _ExitState())
+            self._drop_expired(now)
             count = len(self._exits)
             best: tuple[int, int] | None = None
             for index in range(count):
                 candidate = self._exits[index]
                 state = self._state.setdefault(candidate.addr, _ExitState())
-                # 冷却结束 = 休息过了：配额刷新，否则这个出口永远不可能再用
-                if state.blocked_until and state.blocked_until <= now and state.used >= self.per_exit_quota:
-                    state.used = 0
+                # 注意：这里不再「冷却到期就复活配额」。
+                # 配额用尽 / 到期 / 失败的出口都已被 _drop 移除，复活只会把过期 IP 重新拿出来用。
                 if candidate.addr == _DIRECT:
                     # 直连就是用户自己的网络：不计配额、不冷却，否则少量任务会被自己卡死
                     return candidate
@@ -317,9 +469,14 @@ class ExitPool:
                     best = (state.used, index)
 
             if best is not None:
-                state = self._state[self._exits[best[1]].addr]
+                chosen = self._exits[best[1]]
+                state = self._state[chosen.addr]
                 state.used += 1
-                return self._exits[best[1]]
+                self.used_total += 1
+                # 配额用尽 → 立刻从池子里移除（真正的「用完就丢」）
+                if state.used >= self.per_exit_quota:
+                    self._exits = [e for e in self._exits if e.addr != chosen.addr]
+                return chosen
             raise ExitPoolEmpty(
                 f"所有出口都在配额或冷却中（{self.diagnose()}）；"
                 "请调大「IP 复用」或在提取链接里要求更多 IP"

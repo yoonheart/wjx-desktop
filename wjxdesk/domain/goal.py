@@ -15,6 +15,92 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+# 矩阵行编号：第 5 题第 3 行记作 503。与 engine/goal_solver 里的约定保持一致，
+# 空着的行号 0 表示「整题」（只对量表/单选有意义）。
+ROW_STRIDE = 100
+
+AGGREGATE_SINGLE = "single"
+AGGREGATE_MEAN = "mean"
+AGGREGATES = (AGGREGATE_SINGLE, AGGREGATE_MEAN)
+
+
+def make_ref(question: int, row: int = 0) -> int:
+    """题号 + 行号 → 项目编号。"""
+    return int(question) * ROW_STRIDE + int(row) if row else int(question)
+
+
+def split_ref(ref: int) -> tuple[int, int]:
+    """项目编号 → (题号, 行号)；行号为 0 表示整题。"""
+    value = int(ref)
+    if value >= ROW_STRIDE:
+        question, row = divmod(value, ROW_STRIDE)
+        return question, row
+    return value, 0
+
+
+def parse_refs(raw: Any) -> tuple[int, ...]:
+    """接受 [8, 801] / "8,801" / "8 801" / "8;801"，统一成整数元组。"""
+    if raw is None:
+        return ()
+    if isinstance(raw, (list, tuple, set)):
+        out: list[int] = []
+        for item in raw:
+            try:
+                out.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return tuple(out)
+    import re
+
+    return tuple(int(x) for x in re.split(r"[,;\s、]+", str(raw)) if x.strip().isdigit())
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeSpec:
+    """因变量：一个或几个项目，按需合成一个数值。
+
+    - items：项目编号（题号；矩阵行用 题号*100+行号）
+    - aggregate：single（单题/单行）或 mean（多行取均值，用于多维构念）
+    - positive：哪些选项算「正面」，只有二分类结局（单选）才用
+    """
+
+    items: tuple[int, ...] = ()
+    aggregate: str = AGGREGATE_SINGLE
+    positive: tuple[int, ...] = ()
+    label: str = ""
+
+    @property
+    def question(self) -> int:
+        """第一个项目所属的题号，供展示与旧字段使用。"""
+        return split_ref(self.items[0])[0] if self.items else 0
+
+    @property
+    def used(self) -> bool:
+        return bool(self.items)
+
+    @property
+    def is_composite(self) -> bool:
+        return len(self.items) > 1 or self.aggregate == AGGREGATE_MEAN
+
+    def validate(self) -> None:
+        if self.aggregate not in AGGREGATES:
+            raise ValueError(f"结局合成方式不合法：{self.aggregate}")
+        for ref in self.items:
+            if ref <= 0:
+                raise ValueError(f"结局项目编号不合法：{ref}")
+            question, row = split_ref(ref)
+            if question <= 0 or (ref >= ROW_STRIDE and row <= 0):
+                raise ValueError(f"结局项目编号不合法：{ref}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "items": list(self.items),
+            "aggregate": self.aggregate,
+            "positive": list(self.positive),
+            "label": self.label,
+        }
+
+
 
 def _parse_groups(spec: Any) -> tuple[tuple[int, ...], ...]:
     """把维度分组解析成「题号元组的元组」。
@@ -84,6 +170,10 @@ class ResearchGoal:
     kmo_target: float = 0.70
 
     # -- 结论 --
+    # 结局（因变量）。新写法用 outcome_items（可含矩阵行，可多项目合成）；
+    # outcome_question 是旧写法，保留是为了读老方案文件，两者择一即可。
+    outcome_items: tuple[int, ...] = ()
+    outcome_aggregate: str = AGGREGATE_SINGLE
     outcome_question: int = 0
     positive_options: tuple[int, ...] = ()
     outcome_label: str = ""
@@ -105,6 +195,19 @@ class ResearchGoal:
         return 0
 
     @property
+    def outcome(self) -> OutcomeSpec:
+        """把新旧两种写法收敛成同一个结局描述。"""
+        items = tuple(self.outcome_items) or (
+            (int(self.outcome_question),) if self.outcome_question else ()
+        )
+        return OutcomeSpec(
+            items=items,
+            aggregate=self.outcome_aggregate or AGGREGATE_SINGLE,
+            positive=tuple(self.positive_options),
+            label=self.outcome_label or "",
+        )
+
+    @property
     def dimension_count(self) -> int:
         return max(1, len(self.dimensions))
 
@@ -114,7 +217,7 @@ class ResearchGoal:
 
     @property
     def wants_conclusion(self) -> bool:
-        return bool(self.enabled and self.outcome_question > 0 and self.predictors)
+        return bool(self.enabled and self.outcome.used and self.predictors)
 
     def validate(self) -> None:
         if not self.enabled:
@@ -123,10 +226,13 @@ class ResearchGoal:
             raise ValueError("目标 α 需要在 (0,1] 之间")
         if not 0.0 < self.kmo_target <= 1.0:
             raise ValueError("目标 KMO 需要在 (0,1] 之间")
-        if self.wants_conclusion and not self.positive_options:
-            raise ValueError("指定了结局题，但没选「算作正面」的选项")
+        self.outcome.validate()
         if not 0.0 < self.event_rate < 1.0:
             raise ValueError("事件占比需要在 0 和 1 之间")
+        # 结局项与自变量不能是同一个项目，否则自己解释自己
+        overlap = set(self.outcome.items) & set(self.predictors)
+        if overlap:
+            raise ValueError(f"结局项与自变量重复：{sorted(overlap)}")
 
     def direction_of(self, number: int) -> str:
         return str(self.directions.get(number, "+"))
@@ -139,7 +245,9 @@ class ResearchGoal:
             "reverse": list(self.reverse),
             "dimension_correlation": self.dimension_correlation,
             "kmo_target": self.kmo_target,
-            "outcome_question": self.outcome_question,
+            "outcome_question": self.outcome.question,
+            "outcome_items": list(self.outcome.items),
+            "outcome_aggregate": self.outcome.aggregate,
             "positive_options": list(self.positive_options),
             "outcome_label": self.outcome_label,
             "predictors": list(self.predictors),
@@ -161,6 +269,22 @@ class ResearchGoal:
             except (TypeError, ValueError):
                 continue
 
+        # 结局：新写法 outcome_items / outcome_aggregate；也接受
+        # {"outcome": {"items": [...], "aggregate": "mean"}} 这种嵌套形式
+        nested = raw.get("outcome")
+        if isinstance(nested, Mapping):
+            items = parse_refs(nested.get("items"))
+            aggregate = str(nested.get("aggregate") or AGGREGATE_SINGLE)
+            label = str(nested.get("label") or raw.get("outcome_label") or "")
+            positives = parse_refs(nested.get("positive")) or parse_refs(
+                raw.get("positive_options")
+            )
+        else:
+            items = parse_refs(raw.get("outcome_items"))
+            aggregate = str(raw.get("outcome_aggregate") or AGGREGATE_SINGLE)
+            label = str(raw.get("outcome_label") or "")
+            positives = parse_refs(raw.get("positive_options"))
+
         goal = cls(
             enabled=bool(raw.get("enabled", False)),
             alpha_target=float(raw.get("alpha_target", 0.85)),
@@ -168,14 +292,12 @@ class ResearchGoal:
             reverse=tuple(int(x) for x in (raw.get("reverse") or ()) if str(x).isdigit()),
             dimension_correlation=float(raw.get("dimension_correlation", 0.45)),
             kmo_target=float(raw.get("kmo_target", 0.70)),
-            outcome_question=int(raw.get("outcome_question") or 0),
-            positive_options=tuple(
-                int(x) for x in (raw.get("positive_options") or ()) if str(x).isdigit()
-            ),
-            outcome_label=str(raw.get("outcome_label") or ""),
-            predictors=tuple(
-                int(x) for x in (raw.get("predictors") or ()) if str(x).isdigit()
-            ),
+            outcome_items=items,
+            outcome_aggregate=aggregate,
+            outcome_question=int(raw.get("outcome_question") or 0) if not items else 0,
+            positive_options=positives,
+            outcome_label=label,
+            predictors=parse_refs(raw.get("predictors")),
             directions=directions,
             significant_required=int(raw.get("significant_required") or 0),
             event_rate=float(raw.get("event_rate", 0.5)),
