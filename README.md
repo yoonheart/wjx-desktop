@@ -5,7 +5,7 @@
 > 想体验基础版效果可去 ---> www.yoonheart.me
 
 > [下载 Windows 桌面版 / Download](https://github.com/yoonheart/wjx-desktop/releases/latest) · [问题反馈 / Issues](https://github.com/yoonheart/wjx-desktop/issues)<br>
-> 如果下载速度太慢，可通过百度网盘下载：https://pan.baidu.com/s/1mBCsff2N4Rfavfieq8t7Xg?pwd=5iqh （提取码：5iqh）
+> 如果下载速度太慢，可通过百度网盘下载：https://pan.baidu.com/s/18ziY9_N5Kf1-U9muBkA3lQ?pwd=3y76 （提取码：3y76）
 
 > **作者 Author: YoonHeart**
 
