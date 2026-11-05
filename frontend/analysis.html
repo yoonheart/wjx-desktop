@@ -372,6 +372,14 @@
                        style="width:50px;height:30px;padding:2px 6px;text-align:center;font-size:13px;border:1px solid #ddd;border-radius:6px">
                 <span class="mono-label">项</span>
             </span>
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalAutoDim" style="margin:0;cursor:pointer">
+                    <input type="checkbox" id="goalAutoDim" checked style="margin-right:4px">
+                    自动分维
+                </label>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="勾上：每道矩阵题算一个维度、每道量表题算一个维度（推荐）。6 个矩阵题会得到 6 个维度，每个维度 α 0.85、题项聚在自己因子上。不勾：所有题当成一个维度，α 会被摊薄，因子分析容易碎成多个弱因子。"></i>
+            </span>
         </div>
 
         <div id="goalTargetGroup" class="is-hidden"

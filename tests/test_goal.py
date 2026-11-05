@@ -209,3 +209,75 @@ def test_outcome_and_predictor_overlap_rejected() -> None:
     else:  # pragma: no cover
         raise AssertionError("结局项与自变量重复应当报错")
 
+
+# --------------------------------------------------------------------------- 自动分维
+
+
+def _two_construct_survey() -> Survey:
+    """两个矩阵构念 + 一道独立量表，模拟任意问卷的常见结构。"""
+    items = [
+        Item(number=5, kind=ItemKind.MATRIX, options=_opts(), rows=_opts(4), low=1, high=5),
+        Item(number=6, kind=ItemKind.MATRIX, options=_opts(), rows=_opts(4), low=1, high=5),
+        Item(number=7, kind=ItemKind.SCALE, options=_opts(), low=1, high=5),
+        Item(number=8, kind=ItemKind.SINGLE, options=_opts()),
+    ]
+    return Survey(token="t", items=tuple(items))
+
+
+def test_auto_dimensions_split_by_matrix_question() -> None:
+    """没配维度时按题型自动分维：一道矩阵一维，量表题各自一维。"""
+    goal = ResearchGoal(
+        enabled=True,
+        alpha_target=0.85,
+        kmo_target=0.70,
+        outcome_items=(602,),
+        predictors=(501, 601),
+        directions={501: "+", 601: "-"},
+        significant_required=1,
+        attempts=12,
+    )
+    solver = GoalSolver(_two_construct_survey(), Strategy(total=20, seed=5, goal=goal))
+    assert solver.dimensions == ((501, 502, 503, 504), (601, 603, 604), (7,))
+    assert 602 not in solver._analysis_numbers()
+
+
+def test_auto_dimensions_raise_kmo_and_keep_alpha() -> None:
+    """自动分维后每个维度 α 达标、KMO 也达标（KMO 现在真的参与判断）。"""
+    goal = ResearchGoal(
+        enabled=True,
+        alpha_target=0.85,
+        kmo_target=0.70,
+        outcome_items=(602,),
+        predictors=(501, 601),
+        directions={501: "+", 601: "-"},
+        significant_required=1,
+        attempts=20,
+    )
+    sheets, report = GoalSolver(
+        _two_construct_survey(), Strategy(total=120, seed=5, goal=goal)
+    ).solve(120)
+
+    assert report.alpha >= 0.83, report.notes
+    assert report.kmo >= 0.67, report.notes
+    assert report.achieved, report.notes
+    assert len(sheets) == 120
+
+
+def test_kmo_target_is_enforced() -> None:
+    """KMO 低于目标时不能判达标：以前只写进 notes，从不参与 achieved。"""
+    goal = ResearchGoal(
+        enabled=True,
+        alpha_target=0.85,
+        kmo_target=0.99,  # 现实中到不了
+        outcome_items=(602,),
+        predictors=(501, 601),
+        significant_required=1,
+        attempts=3,
+    )
+    _, report = GoalSolver(
+        _two_construct_survey(), Strategy(total=30, seed=5, goal=goal)
+    ).solve(30)
+    assert not report.achieved
+    assert report.kmo < 0.99
+
+

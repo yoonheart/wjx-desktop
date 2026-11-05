@@ -78,6 +78,7 @@
             alpha: ($('goalAlpha') || {}).value || '0.86',
             kmo: ($('goalKmo') || {}).value || '0.75',
             sig: ($('goalSig') || {}).value || '0',
+            autoDim: autoDimEnabled(),
             outcome: ($('goalOutcome') || {}).value || '',
             mean: Boolean(($('goalOutcomeMean') || {}).checked),
             positive: ($('goalPositive') || {}).value || '',
@@ -117,6 +118,10 @@
         set('goalAlpha', state.alpha);
         set('goalKmo', state.kmo);
         set('goalSig', state.sig);
+        const autoBox = $('goalAutoDim');
+        if (autoBox && state.autoDim !== undefined) {
+            autoBox.checked = Boolean(state.autoDim);
+        }
         // 先还原「合成」勾选，再触发结局变更：onchange 里会重新应用可见性
         const meanBox = $('goalOutcomeMean');
         if (meanBox) {
@@ -276,6 +281,29 @@
         return outcomeItems().length > 1 ? 'mean' : 'single';
     }
 
+    /** 自动分维：每道矩阵题一维、每道量表题一维（结局项已排除）。 */
+    function autoDimensionGroups(exclude) {
+        const groups = [];
+        questions().forEach(function (q) {
+            if (q.isMatrix) {
+                const rows = q.rows
+                    .map(function (r) { return Number(r.key); })
+                    .filter(function (n) { return !exclude[n]; });
+                if (rows.length) {
+                    groups.push(rows);
+                }
+            } else if (q.type.indexOf('量表') >= 0 && !exclude[Number(q.id)]) {
+                groups.push([Number(q.id)]);
+            }
+        });
+        return groups;
+    }
+
+    function autoDimEnabled() {
+        const box = $('goalAutoDim');
+        return box ? Boolean(box.checked) : true;
+    }
+
     function fillSelect(select, items, placeholder) {
         if (!select) {
             return;
@@ -372,7 +400,7 @@
             });
         }
 
-        ['goalEnabled', 'goalAlpha', 'goalKmo', 'goalSig'].forEach(function (id) {
+        ['goalEnabled', 'goalAlpha', 'goalKmo', 'goalSig', 'goalAutoDim'].forEach(function (id) {
             const el = $(id);
             if (el) {
                 el.addEventListener('change', sync);
@@ -464,7 +492,9 @@
                 scaleIds.push(parseInt(q.id, 10));
             }
         });
-        const dimensions = scaleIds.length ? [scaleIds] : [];
+        const dimensions = autoDimEnabled()
+            ? autoDimensionGroups(exclude)
+            : (scaleIds.length ? [scaleIds] : []);
 
         const predictors = [];
         const directions = {};
@@ -516,6 +546,7 @@
             }
             summary.textContent = enabled
                 ? 'α ' + alpha.toFixed(2) + ' · KMO ' + kmo.toFixed(2)
+                    + ' · ' + dimensions.length + ' 个维度'
                     + outcomeText
                     + ' · 因素 ' + predictors.length + ' 个'
                 : '';
@@ -531,9 +562,10 @@
                 hint.textContent = '已开启：请勾选至少一个影响因素。';
             } else {
                 const kind = picked && picked.continuous ? '连续（保序构造）' : '二分类（按占比切分）';
-                hint.textContent = '已开启：量表按 α=' + alpha.toFixed(2) + ' 生成，结局按'
+                hint.textContent = '已开启：'
+                    + dimensions.length + ' 个维度各按 α=' + alpha.toFixed(2) + ' 生成，结局按'
                     + kind + '，' + predictors.length + ' 个影响因素按设定方向构造，至少 '
-                    + sig + ' 项显著。';
+                    + sig + ' 项显著。' + (autoDimEnabled() ? '' : '（自动分维已关闭：所有题当一维）');
             }
         }
     }
@@ -561,7 +593,9 @@
             }
         });
 
-        const dimensions = scorable.length ? [scorable] : [];
+        const dimensions = autoDimEnabled()
+            ? autoDimensionGroups(exclude)
+            : (scorable.length ? [scorable] : []);
 
         const predictors = [];
         const directions = {};

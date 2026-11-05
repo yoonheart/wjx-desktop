@@ -168,6 +168,8 @@ class GoalSolver:
         self.outcome_continuous = self._outcome_is_continuous()
         self.outcome_positives = self._resolve_positives()
         self.dimensions = self._resolve_dimensions()
+        # 维度间相关：运行时会被 KMO 的调整覆盖
+        self.corr = min(0.75, max(0.0, float(self.goal.dimension_correlation)))
         self.seed = strategy.resolved_seed()
 
     # -- 结构 ---------------------------------------------------------------
@@ -208,18 +210,40 @@ class GoalSolver:
         configured = [g for g in configured if g]
         if configured:
             # 没被任何维度覆盖的可评分项挂到最后一组，避免它们退化成纯噪声，
-            # 把 KMO 拖下去（界面上只会传一组，这里主要防手写配置漏项）
+            # 把 KMO 拖下去（手写配置漏项时兜底）
             covered = {n for group in configured for n in group}
             leftovers = [n for n in self._analysis_numbers() if n not in covered]
             if leftovers:
                 configured[-1].extend(leftovers)
             return tuple(tuple(g) for g in configured)
 
+        # 没配维度就按题型自动分维：每道矩阵题一个维度、每道量表题一个维度。
+        # 这一条是「换一份问卷也能用」的关键：把 6 个构念压成一个维度时，
+        # 题项间相关被摊薄，α 靠题数堆上去，EFA 却会碎成七八个因子。
+        auto = self._auto_dimensions(analysis)
+        if auto:
+            return auto
+
         numbers = self._analysis_numbers()
         if not numbers:
             return ()
-        # 默认全部算一个维度（题少时这样最能凑出 α）
         return (tuple(numbers),)
+
+    def _auto_dimensions(self, analysis: set[int]) -> tuple[tuple[int, ...], ...]:
+        groups: list[tuple[int, ...]] = []
+        for item in self.survey.items:
+            if item.kind is ItemKind.MATRIX:
+                rows = tuple(
+                    item.number * 100 + row
+                    for row in range(1, item.row_count + 1)
+                    if item.number * 100 + row in analysis
+                )
+                if rows:
+                    groups.append(rows)
+            elif item.kind is ItemKind.SCALE or self._is_likert(item):
+                if item.number in analysis:
+                    groups.append((item.number,))
+        return tuple(groups)
 
     def _is_likert(self, item) -> bool:
         """单选题但选项是 1..n 的，当作李克特量表。"""
@@ -262,6 +286,9 @@ class GoalSolver:
         # α 对噪声不是线性的，用二分找「刚好达到目标」的噪声量，比乘系数稳得多
         low_scale, high_scale = 0.05, 3.0
         alpha_scale = 1.0
+        # KMO 靠维度间相关调：相关越高 KMO 越高（但太高会让因子并成一个，
+        # 所以上限压到 0.75，保住区分效度）
+        self.corr = min(0.75, max(0.0, float(self.goal.dimension_correlation)))
         # 每个自变量单独的效应量：不显著的单独加大，避免互相抵消
         beta_map = {
             number: (0.8 if self.goal.direction_of(number) != "-" else -0.8)
@@ -284,6 +311,14 @@ class GoalSolver:
                 else:
                     high_scale = alpha_scale
                 alpha_scale = (low_scale + high_scale) / 2.0
+            # KMO 不达标：优先抬维度间相关（多维度时才有意义）
+            if (
+                report.kmo > 0
+                and report.kmo < self.goal.kmo_target - 0.02
+                and len(self.dimensions) > 1
+                and self.corr < 0.75
+            ):
+                self.corr = min(0.75, self.corr + 0.08)
             # 谁不显著就把谁的权重调大（方向不变），逐个处理。
             # 幅度取 1.4 而不是 1.8：调太猛会让另一个自变量掉出显著区，
             # 两个方向交替震荡，永远收敛不到「都显著」。
@@ -361,19 +396,21 @@ class GoalSolver:
         return AnswerSheet(seed=self.seed, unit=unit, answers=answers)
 
     def _draw_factors(self, rng: random.Random) -> list[float]:
-        noise = [rng.gauss(0.0, 1.0) for _ in range(self.goal.dimension_count)]
-        if len(self.dimensions) <= 1:
+        # 因子个数以「实际生效的维度」为准：自动分维时 goal.dimensions 可能是空的
+        count = max(1, len(self.dimensions))
+        noise = [rng.gauss(0.0, 1.0) for _ in range(count)]
+        if count <= 1:
             return noise
 
-        corr = [[0.0] * len(self.dimensions) for _ in self.dimensions]
-        for i in range(len(self.dimensions)):
-            for j in range(len(self.dimensions)):
-                corr[i][j] = 1.0 if i == j else float(self.goal.dimension_correlation)
+        corr = [[0.0] * count for _ in range(count)]
+        for i in range(count):
+            for j in range(count):
+                corr[i][j] = 1.0 if i == j else self.corr
         try:
             lower = _cholesky(corr)
         except ValueError:
             return noise
-        return [sum(lower[i][j] * noise[j] for j in range(i + 1)) for i in range(len(noise))]
+        return [sum(lower[i][j] * noise[j] for j in range(i + 1)) for i in range(count)]
 
     def _option_count(self, number: int) -> int:
         """行编号（题号*100+行号）也能取到对应题目的选项数。"""
@@ -568,8 +605,12 @@ class GoalSolver:
                 "（反向自变量之间会互相抵消，小样本下统计功效不足）"
             )
 
+        # KMO 也必须是达标条件：之前只写进 notes、从没参与判断，
+        # 于是界面上填的「效度 KMO 0.70」实际上不会被执行。
+        kmo_ok = not kmo_value or kmo_value >= self.goal.kmo_target - 0.03
         achieved = bool(
             (not alphas or (self.goal.alpha_target - 0.02 <= alpha <= self.goal.alpha_target + 0.04))
+            and kmo_ok
             and (not self.goal.wants_conclusion or significant >= self._need_significant())
             and len(numbers) >= 2
         )
@@ -607,12 +648,13 @@ class GoalSolver:
     def _matrix_numbers(self) -> list[int]:
         return [item.number for item in self.scale_items]
 
-    @staticmethod
-    def _score(report: GoalReport) -> float:
+    def _score(self, report: GoalReport) -> float:
+        """越小越好：都按目标算，而不是硬编码「0.87 / 0.75 / 3 项」。"""
+        need = self._need_significant()
         return (
-            abs(0.87 - report.alpha) * 2
-            + abs(0.75 - report.kmo)
-            + abs(3 - report.significant)
+            abs(self.goal.alpha_target - report.alpha) * 2.0
+            + abs(self.goal.kmo_target - report.kmo)
+            + max(0, need - report.significant)
         )
 
 

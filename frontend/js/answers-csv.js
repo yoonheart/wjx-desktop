@@ -74,11 +74,17 @@
         }).join(',');
         const items = (goal.outcome_items || []).slice();
         const aggregate = goal.outcome_aggregate || (items.length > 1 ? 'mean' : 'single');
+        const dims = (goal.dimensions || []).map(function (group) {
+            return group.join(',');
+        }).join('|');
+        const autoBox = document.getElementById('goalAutoDim');
         return [
             '# 启用,是',
             '# 信度α,' + goal.alpha_target,
             '# 效度KMO,' + goal.kmo_target,
             '# 至少显著,' + goal.significant_required,
+            '# 自动分维,' + (autoBox && !autoBox.checked ? '否' : '是'),
+            '# 维度,' + dims,
             '# 结局题,' + (goal.outcome_question || ''),
             '# 结局项,' + items.join(','),
             '# 结局合成,' + aggregate,
@@ -360,6 +366,15 @@
         if (settings['效度KMO']) setValue('goalKmo', settings['效度KMO']);
         if (settings['至少显著']) setValue('goalSig', settings['至少显著']);
 
+        // 自动分维：表里有就按表里的来（没写则保持界面现状）
+        if (settings['自动分维'] !== undefined) {
+            const autoBox = document.getElementById('goalAutoDim');
+            if (autoBox) {
+                autoBox.checked = settings['自动分维'] !== '否';
+                autoBox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+
         // 结局：优先读「结局项」（可含矩阵行、可多个），退回旧的「结局题」
         const itemText = (settings['结局项'] || settings['结局题'] || '').trim();
         if (itemText) {
@@ -388,10 +403,39 @@
         const dirs = (settings['影响因素'] || '').split(',').map(function (item) {
             return item.trim();
         }).filter(Boolean);
+        // 结局已经用掉的项目不能再当自变量：这里先算出来，遇到就跳过并提示，
+        // 免得后端因为「结局与自变量重复」整单拒绝
+        const usedAsOutcome = {};
+        (function () {
+            const outcomeEl = document.getElementById('goalOutcome');
+            if (!outcomeEl || !outcomeEl.value) {
+                return;
+            }
+            usedAsOutcome[outcomeEl.value] = true;
+            const meanBox = document.getElementById('goalOutcomeMean');
+            if (meanBox && meanBox.checked) {
+                const host = Math.floor(Number(outcomeEl.value) / 100);
+                document.querySelectorAll('#goalFactors input[data-qid]').forEach(function (box) {
+                    if (Math.floor(Number(box.dataset.qid) / 100) === host) {
+                        usedAsOutcome[box.dataset.qid] = true;
+                    }
+                });
+            }
+        })();
+        // 先全部取消：否则上一次勾过、这次表里没写的因素会残留，
+        // 看起来"导入成功"，实际多带了一批自变量
+        document.querySelectorAll('#goalFactors input[data-qid]').forEach(function (box) {
+            box.checked = false;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+        });
         dirs.forEach(function (item) {
             const pair = item.split(':');
             const qid = (pair[0] || '').trim();
             const dir = (pair[1] || '+').trim();
+            if (usedAsOutcome[qid]) {
+                errors.push('第 ' + qid + ' 项已作为结局，已从影响因素里忽略');
+                return;
+            }
             const box = document.querySelector('#goalFactors input[data-qid="' + qid + '"]');
             const sel = document.querySelector('#goalFactors select[data-dir="' + qid + '"]');
             if (!box) {
@@ -498,16 +542,19 @@
         '保留所有 # 注释行、表头、题号、列顺序和行数，不要增删行列，不要解释，只输出表格内容。',
         '',
         '【我的研究目标】',
-        '- 量表信度：Cronbach α ≈ 0.85（做成一个维度，题目之间高度相关）',
-        '- 效度：KMO 尽量高（注意：可参与的项目少于 4 个时 KMO 上限约 0.6，不要写 0.7 以上）',
+        '- 量表信度：每个维度 Cronbach α ≈ 0.85（同一维度的题要聚在同一个因子上）',
+        '- 效度：KMO ≈ 0.70 以上',
         '- 回归模型：至少 2 个自变量显著（p < 0.05）且有明确方向',
         '',
         '【请这样改】',
         '1. 目标参数（只改值，不改键名）：',
         '   # 启用 → 是',
         '   # 信度α → 0.85',
-        '   # 效度KMO → 0.60（若可参与项目 ≥ 4 个可写 0.70）',
-        '   # 至少显著 → 2',
+        '   # 效度KMO → 0.70',
+        '   # 至少显著 → 2（不要超过你实际勾选的影响因素个数）',
+        '   # 自动分维 → 是（每道矩阵题算一个维度；改成「否」会把所有题压成一个维度，'
+            + '题项间相关被摊薄，因子分析会碎成多个弱因子，不建议）',
+        '   # 维度 → 只读信息，由程序按题型自动生成，不用改',
         '',
         '2. 结局（因变量）：',
         '   可写进 # 结局项，格式是项目编号，英文逗号分隔：',
