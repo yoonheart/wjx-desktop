@@ -91,17 +91,67 @@ def parse_correlation(spec: str, dimensions: int) -> list[list[float]]:
 
 
 def _nearest_positive_definite(matrix: list[list[float]]) -> list[list[float]]:
-    """把相关矩阵拉成半正定：特征值不可能为负，简单做法是加对角阻尼。"""
+    """把相关矩阵拉成正定：向单位矩阵收缩（对角线保持 1）。
+
+    旧做法是给对角线加阻尼（1 → 1.3），那会改变方差、把所有相关整体稀释，
+    实测中会把整张矩阵压成独立阵。正确做法是
+    `Σ(λ) = (1-λ)Σ + λI`：对角线恒为 1，只等比缩小相关系数，
+    λ 取"刚好正定"的最小值，因此对结构的破坏最小。
+    """
     size = len(matrix)
-    for attempt in range(6):
+    for i in range(size):
+        matrix[i][i] = 1.0
+    try:
+        _cholesky(matrix)
+        return matrix
+    except ValueError:
+        pass
+
+    low, high = 0.0, 1.0
+    best = [[1.0 if i == j else 0.0 for j in range(size)] for i in range(size)]
+    for _ in range(30):
+        mid = (low + high) / 2.0
+        candidate = [
+            [
+                1.0 if i == j else (1.0 - mid) * matrix[i][j]
+                for j in range(size)
+            ]
+            for i in range(size)
+        ]
         try:
-            _cholesky(matrix)
-            return matrix
+            _cholesky(candidate)
         except ValueError:
-            for i in range(size):
-                matrix[i][i] = min(1.0, matrix[i][i] + 0.05 * (attempt + 1))
-    # 实在不行就退化成独立
-    return [[1.0 if i == j else 0.0 for j in range(size)] for i in range(size)]
+            low = mid
+            continue
+        best = candidate
+        high = mid
+    return best
+
+
+def project_correlation(matrix: list[list[float]]) -> tuple[list[list[float]], float]:
+    """返回「投影后的相关矩阵」以及收缩强度 λ（0 表示原矩阵本来就正定）。
+
+    调用方应当把 λ 报给用户：λ 越大，说明用户填的相关越自相矛盾，
+    实际生成时被整体削弱得越多。
+    """
+    size = len(matrix)
+    source = [row[:] for row in matrix]
+    for i in range(size):
+        source[i][i] = 1.0
+    try:
+        _cholesky(source)
+        return source, 0.0
+    except ValueError:
+        pass
+    projected = _nearest_positive_definite([row[:] for row in source])
+    # 反推 λ：任取一个非对角元素比较
+    for i in range(size):
+        for j in range(size):
+            if i != j and abs(source[i][j]) > 1e-9:
+                lam = 1.0 - projected[i][j] / source[i][j]
+                return projected, max(0.0, min(1.0, lam))
+    return projected, 1.0
+
 
 
 def _cholesky(matrix: list[list[float]]) -> list[list[float]]:

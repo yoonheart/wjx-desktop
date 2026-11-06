@@ -60,7 +60,21 @@ _DOCS: dict[str, Any] = {
         "dimensions": {"type": "list[list[int]]",
                        "desc": "维度分组；项目编号见 goal.outcome_items 的说明。留空=全部可评分项一组"},
         "reverse": {"type": "list[int]", "desc": "反向计分的项目编号"},
-        "dimension_correlation": {"type": "float", "desc": "维度间相关，影响 KMO"},
+        "dimension_correlation": {"type": "float",
+                                  "desc": "构念间相关的默认值（不带符号），未在 dimension_correlations 里指定的构念对用它"},
+        "dimension_correlations": {"type": "object",
+                                   "desc": "按构念对覆盖相关，可正可负；键为 \"0-1\" 或 \"部署-障碍\"。"
+                                           "这是表达「负向影响」的唯一字段，例如 {\"0-4\": 0.45, \"1-4\": -0.45}"},
+        "target_effect": {"type": "float",
+                          "desc": "期望的题级相关强度（0~0.95）。只给 directions 不给相关时，"
+                                  "用它反推构念间相关"},
+        "ordinal_items": {"type": "list[int]",
+                          "desc": "把指定单选题当成有序测量（如使用时长 1~4 档），可作调节变量"},
+        "moderation": {"type": "object",
+                       "desc": "调节路径 {\"focal\": 自变量项目, \"moderator\": 调节项目, "
+                               "\"effect\": 0.35}；effect 越大交互项越显著"},
+        "marginals": {"type": "object",
+                      "desc": "{项目编号: [各选项占比]}，留空用默认的中间偏高形状"},
         "outcome_items": {"type": "list[int]",
                           "desc": "因变量项目：题号；矩阵行用 题号*100+行号（第5题第3行=503）；"
                                   "多个项目=多维构念，按 outcome_aggregate 合成"},

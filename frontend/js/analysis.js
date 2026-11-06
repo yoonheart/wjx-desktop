@@ -37,6 +37,33 @@ function setVisible(target, visible) {
 const SETTINGS_KEY = 'wjxSettings';
 
 /**
+ * 代理相关控件随开关联动：
+ * - 关掉代理时，输入框与「检验 / 如何获取」一起隐藏；
+ * - 输入为空时「检验」置灰，避免点了只得到一句"没填链接"。
+ */
+function syncProxyControls() {
+    const proxySwitch = document.getElementById('proxySwitch');
+    const on = Boolean(proxySwitch && proxySwitch.checked);
+    ['apiUrlGroup', 'proxyCheckBtn', 'proxyHelpBtn'].forEach(function (id) {
+        setVisible(document.getElementById(id), on);
+    });
+    refreshCheckButton();
+}
+
+function refreshCheckButton() {
+    const button = document.getElementById('proxyCheckBtn');
+    if (!button) {
+        return;
+    }
+    const input = document.getElementById('apiUrl');
+    const hasLink = Boolean(input && String(input.value || '').trim());
+    button.disabled = !hasLink;
+    button.title = hasLink
+        ? '用这条提取链接做一次真实检查'
+        : '先粘贴提取链接，再用它检查';
+}
+
+/**
  * 从 localStorage 恢复功能详细设置。
  * 保存的字段：proxySwitch、apiUrl、guiMode、timeControlSwitch、minFillTime、maxFillTime。
  */
@@ -58,11 +85,11 @@ function restoreSettings() {
 
     if (proxySwitch && typeof settings.proxySwitch === 'boolean') {
         proxySwitch.checked = settings.proxySwitch;
-        setVisible(document.getElementById('apiUrlGroup'), proxySwitch.checked);
     }
     if (apiUrl && typeof settings.apiUrl === 'string') {
         apiUrl.value = settings.apiUrl;
     }
+    syncProxyControls();
     if (guiMode && typeof settings.guiMode === 'boolean') {
         guiMode.checked = settings.guiMode;
     }
@@ -769,15 +796,20 @@ function saveSettings() {
         // IP 代理：每次进入解析页都默认开启，不受上次手动关闭的影响
         forceProxyOn();
 
-        // 代理开关：控制API输入框显隐（默认开启显示）
-        const proxySwitch = document.getElementById('proxySwitch');
-        const apiUrlGroup = document.getElementById('apiUrlGroup');
-        if (proxySwitch && apiUrlGroup) {
-            proxySwitch.addEventListener('change', function() {
-                setVisible(apiUrlGroup, proxySwitch.checked);
+        // 代理开关：输入框与「检验 / 如何获取」一起显隐；空输入时禁止点检验
+        const proxySwitchEl = document.getElementById('proxySwitch');
+        const proxyLinkField = document.getElementById('apiUrl');
+        if (proxySwitchEl) {
+            proxySwitchEl.addEventListener('change', function() {
+                syncProxyControls();
                 saveSettings();
             });
         }
+        if (proxyLinkField) {
+            proxyLinkField.addEventListener('input', refreshCheckButton);
+            proxyLinkField.addEventListener('change', refreshCheckButton);
+        }
+        syncProxyControls();
 
         // 信效度 / 合成答卷面板：改动即按「当前问卷」存一份。
         // 换回同一份问卷时原样恢复，换另一份问卷则读它自己那一桶（互不影响）。
@@ -937,11 +969,61 @@ function saveSettings() {
             });
         }
 
-        // 代理引导弹窗：点击"如何获取ip代理"按钮打开
+        // 代理引导弹窗
         const proxyHelpBtn = document.getElementById('proxyHelpBtn');
         if (proxyHelpBtn) {
             proxyHelpBtn.addEventListener('click', function() {
                 document.getElementById('proxyHelpModal').classList.add('is-open');
+            });
+        }
+
+        // 代理体检：提取一次 IP，再走它请求一次外网，结果用右上角提示展示
+        const proxyCheckBtn = document.getElementById('proxyCheckBtn');
+        if (proxyCheckBtn) {
+            proxyCheckBtn.addEventListener('click', async function() {
+                const input = document.getElementById('apiUrl');
+                const link = ((input && input.value) || '').trim();
+                const label = proxyCheckBtn.textContent.trim();
+                proxyCheckBtn.disabled = true;
+                proxyCheckBtn.textContent = '检验中…';
+                try {
+                    const response = await fetch('/api/proxy/check', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ link: link })
+                    });
+                    const body = await response.json();
+                    if (!body || body.code !== 1) {
+                        showAlert('代理检查失败：' + ((body && body.msg) || '未知错误'), 'error', 12000);
+                        return;
+                    }
+                    const data = body.data || {};
+                    const lines = [];
+                    if (data.local_ip) {
+                        lines.push('本机公网 IP：' + data.local_ip);
+                    }
+                    if (data.exit_addr) {
+                        lines.push('提取到出口：' + data.exit_addr);
+                    }
+                    if (data.http_code) {
+                        lines.push('出口探测：HTTP ' + data.http_code
+                            + (data.elapsed_ms ? '（' + data.elapsed_ms + ' ms）' : ''));
+                    }
+                    if (data.exit_ip && data.exit_ip !== data.local_ip) {
+                        lines.push('实际出口 IP：' + data.exit_ip);
+                    }
+                    if (data.hint) {
+                        lines.push(data.hint);
+                    }
+                    const kind = data.verdict === 'ok' ? 'success'
+                        : (data.verdict === 'no_link' ? 'info' : 'error');
+                    showAlert(lines.join('\n'), kind, 20000);
+                } catch (error) {
+                    showAlert('代理检查请求失败：' + error, 'error', 12000);
+                } finally {
+                    proxyCheckBtn.disabled = false;
+                    proxyCheckBtn.textContent = label;
+                }
             });
         }
 
@@ -1310,12 +1392,16 @@ function saveSettings() {
                 }
             }
 
-            // 信效度优化（默认关闭）
-            const validityEnabled = Boolean(window.GoalPanel && window.GoalPanel.payload && window.GoalPanel.payload());
+            // 数据目标：新面板的规格是唯一真值源，必须随请求发给后端。
+            // 以前只写进了 localStorage，后端只能读旧的 synth 兼容字段，
+            // 导致相关矩阵/调节/反向题等新配置在真实开刷时全部丢失。
+            const newGoal = (window.GoalPanel && window.GoalPanel.payload)
+                ? window.GoalPanel.payload() : null;
+            const validityEnabled = Boolean(newGoal);
             const validity = getValidityConfig();
-            // 合成答卷：规格直接从面板收集（导入配置只是把它回填到面板）
+            // 合成答卷是旧界面的兼容规格：新面板生效时不再用它做拦路校验。
             const synthSpec = collectSynthSpec();
-            if (synthSpec) {
+            if (synthSpec && !newGoal) {
                 if (!synthSpec.outcome.question) {
                     showAlert('合成答卷已开启，但没填因变量题号。请在「因变量」里填题号（如 21）再开始。', 'error');
                     return;
@@ -1355,10 +1441,12 @@ function saveSettings() {
                     ['信效度优化', validityEnabled
                         ? `开启（目标信度 ${validity.target.toFixed(2)}${validity.dimensions ? '，维度 ' + validity.dimensions : '，单维度'}${validity.singleQuestions ? '，量表题号 ' + validity.singleQuestions : ''}）`
                         : '关闭'],
-                    ['合成答卷', synthSpec
-                        ? `开启（Y=${synthSpec.outcome.label} / Q${synthSpec.outcome.question}，`
-                          + `${synthSpec.predictors.length} 个自变量，目标 ${synthSpec.targets.sigTotal[0]}-${synthSpec.targets.sigTotal[1]} 个显著，`
-                          + `α≥${synthSpec.targets.alphaMin.toFixed(2)}，KMO≥${synthSpec.targets.kmoMin.toFixed(2)}）`
+                    ['数据目标', newGoal
+                        ? `开启（α ${Number(newGoal.alpha_target || 0).toFixed(2)} / `
+                          + `KMO ${Number(newGoal.kmo_target || 0).toFixed(2)} / `
+                          + `${(newGoal.dimensions || []).length} 个构念 / `
+                          + `${(newGoal.predictors || []).length} 个自变量`
+                          + `${newGoal.moderation && newGoal.moderation.focal ? ' / 含调节' : ''}）`
                         : '关闭']
                 ],
                 message: '任务开始后无法中途暂停，请确认以上参数无误。',
@@ -1390,7 +1478,8 @@ function saveSettings() {
                     validitySingleQuestions: validity.singleQuestions,
                     validityCorrelation: validity.correlation,
                     validityReverse: validity.reverse,
-                    // 合成答卷规格（null = 走普通概率模式）
+                    // 新数据目标（后端优先读它）；synth 仅供旧配置兜底
+                    goal: newGoal,
                     synth: synthSpec
                 };
                     
@@ -1398,7 +1487,7 @@ function saveSettings() {
                     const currentConfig = {
                         targetCount: targetCount,
                         speedMultiplier: speedMultiplier,
-                        goal: (window.GoalPanel && window.GoalPanel.payload) ? window.GoalPanel.payload() : null,
+                        goal: newGoal,
                 questionsConfig: questionsConfig
                     };
                     localStorage.setItem('wjxCurrentConfig', JSON.stringify(currentConfig));
@@ -4613,12 +4702,17 @@ function showStopReasons(taskId) {
                     return '<li class="stop-reason__detail">第 ' + r.unit_index + ' 份：' + r.detail + '</li>';
                 });
 
-            if (!lines.length && !details.length) {
+            // 后端给出的「任务为何停止」：代理配置错误这类会直接写在这里
+            const stopReason = String(data.stop_reason || '').trim();
+            const reasonLine = stopReason
+                ? '<li class="stop-reason__detail">' + stopReason + '</li>'
+                : '';
+            if (!lines.length && !details.length && !reasonLine) {
                 box.innerHTML = '<div class="stop-reason__title">没有失败记录</div>';
                 return;
             }
             box.innerHTML = '<div class="stop-reason__title">停止原因</div>'
-                + '<ul class="stop-reason__list">' + lines.join('') + details.join('') + '</ul>';
+                + '<ul class="stop-reason__list">' + reasonLine + lines.join('') + details.join('') + '</ul>';
         })
         .catch(function () {
             box.innerHTML = '<div class="stop-reason__title">读取原因失败（可查看日志文件）</div>';
@@ -5131,9 +5225,12 @@ function startProgressMonitoring(taskId) {
     sse = new EventSource(`/api/brush/progress/${taskId}`);
 
     // 后端发送的是命名事件 "progress"，必须用 addEventListener 接收
-    sse.addEventListener('progress', function(event) {
+    let finalized = false;
+    function applyProgress(data) {
+        if (!data || finalized) {
+            return;
+        }
         try {
-            const data = JSON.parse(event.data);
             // 更新进度条宽度
             document.getElementById('progressBar').style.width = data.percent + '%';
             // 更新已完成数量
@@ -5156,6 +5253,7 @@ function startProgressMonitoring(taskId) {
             }
 
             if (data.status === 'COMPLETED') {
+                finalized = true;
                 sse.close();
                 // 进度条填满
                 document.getElementById('progressBar').style.width = '100%';
@@ -5170,6 +5268,7 @@ function startProgressMonitoring(taskId) {
                     }
                 });
             } else if (data.status === 'FAILED' || data.status === 'STOPPED') {
+                finalized = true;
                 sse.close();
                 // 保留进度面板显示结束状态，不突然消失
                 const title = document.getElementById('progressTitle');
@@ -5196,10 +5295,38 @@ function startProgressMonitoring(taskId) {
         } catch (e) {
             console.error('解析进度数据失败:', e);
         }
+    }
+
+    sse.addEventListener('progress', function(event) {
+        try {
+            applyProgress(JSON.parse(event.data));
+        } catch (e) {
+            console.error('解析进度数据失败:', e);
+        }
     });
 
+    // SSE 断线时前端会一直停在最后一帧（用户看到的就是"卡在 0%"）。
+    // 每 3 秒查一次任务详情做兜底：拿到终态就走同一套收尾逻辑。
+    const poller = setInterval(function () {
+        if (!currentTaskId || currentTaskId !== taskId || finalized) {
+            clearInterval(poller);
+            return;
+        }
+        fetch('/api/tasks/' + encodeURIComponent(taskId))
+            .then(function (response) { return response.json(); })
+            .then(function (res) {
+                const task = (res && res.data && res.data.task) || null;
+                if (!task || ['COMPLETED', 'FAILED', 'STOPPED'].indexOf(task.status) < 0) {
+                    return;
+                }
+                clearInterval(poller);
+                applyProgress(task);
+            })
+            .catch(function () { /* 网络抖动，下一轮再试 */ });
+    }, 3000);
+
     sse.onerror = function() {
-        console.error('SSE连接出错，尝试重新连接...');
+        console.error('SSE连接出错，等待轮询兜底...');
     };
 }
 

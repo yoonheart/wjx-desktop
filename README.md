@@ -5,7 +5,7 @@
 > 想体验基础版效果可去 ---> www.yoonheart.me
 
 > [下载 Windows 桌面版 / Download](https://github.com/yoonheart/wjx-desktop/releases/latest) · [问题反馈 / Issues](https://github.com/yoonheart/wjx-desktop/issues)<br>
-> 如果下载速度太慢，可通过百度网盘下载：https://pan.baidu.com/s/18ziY9_N5Kf1-U9muBkA3lQ?pwd=3y76 （提取码：3y76）
+> 如果下载速度太慢，可通过百度网盘下载：https://pan.baidu.com/s/1_7zELXTE1cR1X7KWqy-tKg?pwd=eew4 （提取码：eew4）
 
 > **作者 Author: YoonHeart**
 
@@ -23,8 +23,11 @@
 - **可复现**：同一个 `seed + 份号` 永远生成同一份答案。
 - **结果可信**：三层节奏（令牌桶 / 对数正态冷却 / 出口配额）；结果分「成功 / 需验证 / 关闭 / 限次 / 未知」，未知绝不冒充成功。
 - **可验证**：`verify` 只打印请求不发送；每份提交落库，支持 CSV 导出。
-- **数据目标**：按信度 α / 效度 KMO / 显著性反推答卷结构；结局（因变量）支持单选题、
-  量表题、矩阵的某一行，或矩阵多行取均值。详见 `docs/architecture.md` 第 10 节。
+- **数据目标**：统计层只有一个真值源——**构念 + 构念间相关（带符号）+ 每题占比**。
+  α、KMO、显著性都由同一批数据算出来，不再各凑各的，因此不会出现
+  "KMO 好看了、因子却散了"这种自相矛盾。想表达"部署↑、障碍↓"这类负向路径，
+  写在 `# 相关` 里（如 `1-4:-0.45`）；相关矩阵自相矛盾时会被收缩并明确报告。
+  详见 `docs/architecture.md` 第 10 节。
 
 ## 🖼️ 界面预览
 

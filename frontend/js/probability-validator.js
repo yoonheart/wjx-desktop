@@ -679,12 +679,18 @@ const ProbabilityValidator = {
     
     // 显示错误信息（统一走右上角提示）
     showErrors: function(errors) {
+        if (window.__wjxImporting) {
+            return;
+        }
         if (!errors || errors.length === 0) return;
         this.showQuestionLevelErrors({ isValid: false, errors: errors });
     },
     
     // 显示题目级别的错误信息：每个出错题目挂一条红色浮标 + 汇总一条右上角通知
     showQuestionLevelErrors: function(validationResult) {
+        if (window.__wjxImporting) {
+            return;
+        }
         if (validationResult.isValid) return;
         
         const errors = validationResult.errors || [];

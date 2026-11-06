@@ -15,9 +15,23 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from wjxdesk.domain.errors import ExitPoolEmpty
+from wjxdesk.domain.errors import ExitPoolEmpty, ProxyConfigError
 
 _DIRECT = "direct"
+
+# 这些词出现在提取返回里，说明是配置问题而不是"暂时没货"
+_CONFIG_HINTS = ("白名单", "未匹配", "10101", "余额不足", "额度", "认证失败", "用户名")
+_WHITELIST_HINTS = ("白名单", "未匹配", "10101")
+
+
+def _looks_like_config_error(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(hint.lower() in lowered for hint in _CONFIG_HINTS)
+
+
+def _mentions_whitelist(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(hint.lower() in lowered for hint in _WHITELIST_HINTS)
 
 log = logging.getLogger("wjxdesk.proxy")
 
@@ -252,6 +266,14 @@ class ExitPool:
             detail = ""
             if text.strip():
                 detail = "；代理返回：" + " ".join(text.strip().split())[:100]
+            if _looks_like_config_error(text):
+                raise ProxyConfigError(
+                    "代理配置有问题，重试无效："
+                    + ("白名单未包含本机公网 IP" if _mentions_whitelist(text)
+                       else "账号或额度异常")
+                    + detail
+                    + "。请到代理后台加白名单/充值，或改用账密模式的提取链接"
+                )
             raise ExitPoolEmpty(
                 "代理链接没有返回可用 IP（检查是否白名单未加当前公网 IP、额度是否用完、提取是否过于频繁）"
                 + detail

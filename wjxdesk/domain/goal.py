@@ -165,6 +165,16 @@ class ResearchGoal:
     reverse: tuple[int, ...] = ()
     # 维度间相关：0=独立维度，0.6=强相关（影响 KMO）
     dimension_correlation: float = 0.45
+    # 按「构念对」覆盖相关，带符号。键支持 "0-1" 或 "部署-障碍"
+    dimension_correlations: Mapping[str, float] = field(default_factory=dict)
+    # 期望的题级效应量（相关系数绝对值），用于把方向换算成构念间相关
+    target_effect: float = 0.45
+    # 每题的选项占比（项目编号 -> 占比元组），留空用默认形状
+    marginals: Mapping[int, tuple[float, ...]] = field(default_factory=dict)
+    # 把指定单选题当成有序测量（例如"使用时长 1~4 档"要当调节变量）
+    ordinal_items: tuple[int, ...] = ()
+    # 调节：{"focal": 自变量项目, "moderator": 调节项目, "effect": 0.35}
+    moderation: Mapping[str, float] = field(default_factory=dict)
 
     # -- 效度 --
     kmo_target: float = 0.70
@@ -244,6 +254,11 @@ class ResearchGoal:
             "dimensions": [list(g) for g in self.dimensions],
             "reverse": list(self.reverse),
             "dimension_correlation": self.dimension_correlation,
+            "dimension_correlations": dict(self.dimension_correlations),
+            "target_effect": self.target_effect,
+            "marginals": {str(k): list(v) for k, v in self.marginals.items()},
+            "ordinal_items": list(self.ordinal_items),
+            "moderation": dict(self.moderation),
             "kmo_target": self.kmo_target,
             "outcome_question": self.outcome.question,
             "outcome_items": list(self.outcome.items),
@@ -285,12 +300,38 @@ class ResearchGoal:
             label = str(raw.get("outcome_label") or "")
             positives = parse_refs(raw.get("positive_options"))
 
+        correlations: dict[str, float] = {}
+        for key, value in (raw.get("dimension_correlations") or {}).items():
+            try:
+                correlations[str(key)] = max(-0.98, min(0.98, float(value)))
+            except (TypeError, ValueError):
+                continue
+
+        marginals: dict[int, tuple[float, ...]] = {}
+        for key, value in (raw.get("marginals") or {}).items():
+            try:
+                ref = int(key)
+                values = tuple(float(x) for x in value)
+            except (TypeError, ValueError):
+                continue
+            if len(values) >= 2 and sum(values) > 0:
+                marginals[ref] = values
+
         goal = cls(
             enabled=bool(raw.get("enabled", False)),
             alpha_target=float(raw.get("alpha_target", 0.85)),
             dimensions=_parse_groups(raw.get("dimensions")),
             reverse=tuple(int(x) for x in (raw.get("reverse") or ()) if str(x).isdigit()),
             dimension_correlation=float(raw.get("dimension_correlation", 0.45)),
+            dimension_correlations=correlations,
+            target_effect=float(raw.get("target_effect", 0.45)),
+            marginals=marginals,
+            ordinal_items=parse_refs(raw.get("ordinal_items")),
+            moderation={
+                str(k): float(v)
+                for k, v in (raw.get("moderation") or {}).items()
+                if str(v).replace(".", "", 1).replace("-", "", 1).isdigit()
+            },
             kmo_target=float(raw.get("kmo_target", 0.70)),
             outcome_items=items,
             outcome_aggregate=aggregate,

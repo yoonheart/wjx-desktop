@@ -27,5 +27,13 @@ class ExitPoolEmpty(WjxDeskError):
     """出口池耗尽，且没有直连兜底。"""
 
 
+class ProxyConfigError(ExitPoolEmpty):
+    """代理配置本身有问题（白名单未加、额度用完、鉴权失败）。
+
+    这类错误重试多少次都不会好，必须立刻停下来告诉用户改配置，
+    不能当成"暂时没货"反复等。
+    """
+
+
 class TaskAborted(WjxDeskError):
     """任务被用户或策略中止。"""

@@ -34,7 +34,10 @@
             + '<input id="synthPredictors">'
             + '<input id="synthEffects">'
             + '<input id="synthSigLo">'
-            + '<input id="synthSigHi">';
+            + '<input id="synthSigHi">'
+            + '<input id="goalEffect">'
+            + '<input id="goalDefaultCorr">'
+            + '<input id="goalReverseValue">';
         document.body.appendChild(holder);
     }
 
@@ -45,9 +48,21 @@
     // 后端不可用时退回 localStorage，至少本次会话不丢。
 
     function surveyToken() {
-        const match = String(location.search || '').match(/vm\/([A-Za-z0-9]+)/)
-            || String(location.search || '').match(/shortid=([A-Za-z0-9]+)/);
+        const raw = String(location.search || '') + String(location.hash || '');
+        let decoded = raw;
+        try {
+            decoded = decodeURIComponent(raw);
+        } catch (error) {
+            decoded = raw;
+        }
+        const match = decoded.match(/vm\/([A-Za-z0-9]+)/)
+            || decoded.match(/shortid=([A-Za-z0-9]+)/);
         return match ? match[1] : 'unknown';
+    }
+
+    /** 老版本把配置都存进了 goal:unknown；读不到本问卷的桶时回退读它一次。 */
+    function legacyKey() {
+        return storageKey() === 'goal:unknown' ? '' : 'goal:unknown';
     }
 
     function storageKey() {
@@ -79,6 +94,7 @@
             kmo: ($('goalKmo') || {}).value || '0.75',
             sig: ($('goalSig') || {}).value || '0',
             autoDim: autoDimEnabled(),
+            mode: ($('goalMode') || {}).value || 'full',
             outcome: ($('goalOutcome') || {}).value || '',
             mean: Boolean(($('goalOutcomeMean') || {}).checked),
             positive: ($('goalPositive') || {}).value || '',
@@ -122,6 +138,12 @@
         if (autoBox && state.autoDim !== undefined) {
             autoBox.checked = Boolean(state.autoDim);
         }
+        if (state.mode) {
+            const modeBox = $('goalMode');
+            if (modeBox) {
+                modeBox.value = state.mode;
+            }
+        }
         // 先还原「合成」勾选，再触发结局变更：onchange 里会重新应用可见性
         const meanBox = $('goalOutcomeMean');
         if (meanBox) {
@@ -158,18 +180,24 @@
 
     function loadSaved() {
         let local = null;
-        try {
-            const raw = localStorage.getItem(storageKey());
-            local = raw ? JSON.parse(raw) : null;
-        } catch (error) {
-            local = null;
+        const keys = [storageKey(), legacyKey()].filter(Boolean);
+        for (let i = 0; i < keys.length && !local; i += 1) {
+            try {
+                const raw = localStorage.getItem(keys[i]);
+                local = raw ? JSON.parse(raw) : null;
+            } catch (error) {
+                local = null;
+            }
         }
         if (local) {
             restore(local);
         }
         fetch('/api/state').then(function (r) { return r.json(); }).then(function (body) {
             const items = (body && body.data) || {};
-            const raw = items[storageKey()];
+            let raw = items[storageKey()];
+            if (!raw && legacyKey()) {
+                raw = items[legacyKey()];
+            }
             if (!raw) {
                 return;
             }
@@ -181,14 +209,26 @@
         }).catch(function () { /* 忽略 */ });
     }
 
-    function toggleBody() {
+    function setHidden(id, hidden) {
+        const el = $(id);
+        if (el) {
+            el.classList.toggle('is-hidden', hidden);
+        }
+    }
+
+    /** 按「分析类型」只露出该用的那几块，避免一屏全是配置。 */
+    function applyMode() {
         const on = Boolean(($('goalEnabled') || {}).checked);
-        ['goalBodyGroup', 'goalTargetGroup', 'goalFactorGroup'].forEach(function (id) {
-            const el = $(id);
-            if (el) {
-                el.classList.toggle('is-hidden', !on);
-            }
-        });
+        const mode = ($('goalMode') || {}).value || 'full';
+        setHidden('goalBodyGroup', !on);
+        setHidden('goalModeGroup', !on);
+        setHidden('goalTargetGroup', !(on && mode !== 'basic'));
+        setHidden('goalRelationGroup', !(on && mode === 'full'));
+        setHidden('goalFactorGroup', !(on && mode !== 'basic'));
+    }
+
+    function toggleBody() {
+        applyMode();
         sync();
     }
 
@@ -281,6 +321,36 @@
         return outcomeItems().length > 1 ? 'mean' : 'single';
     }
 
+    /** "4,10" → [4, 10] */
+    function parseRefList(text) {
+        return String(text || '').split(/[,\s、;]+/)
+            .map(function (x) { return parseInt(x, 10); })
+            .filter(function (n) { return n > 0; });
+    }
+
+    /** "501*4:0.30" → {focal:501, moderator:4, effect:0.3} */
+    function parseModeration(text) {
+        const part = String(text || '').trim();
+        if (!part) {
+            return {};
+        }
+        const cut = part.lastIndexOf(':');
+        if (cut <= 0) {
+            return {};
+        }
+        const pair = part.slice(0, cut).split('*');
+        const effect = parseFloat(part.slice(cut + 1));
+        if (pair.length !== 2) {
+            return {};
+        }
+        const focal = parseInt(pair[0], 10);
+        const moderator = parseInt(pair[1], 10);
+        if (!focal || !moderator || !isFinite(effect)) {
+            return {};
+        }
+        return { focal: focal, moderator: moderator, effect: effect };
+    }
+
     /** 自动分维：每道矩阵题一维、每道量表题一维（结局项已排除）。 */
     function autoDimensionGroups(exclude) {
         const groups = [];
@@ -296,6 +366,12 @@
                 groups.push([Number(q.id)]);
             }
         });
+        // 有序题（如使用时长）单独成维，否则界面维度数会和后端对不上
+        parseRefList(($('goalOrdinal') || {}).value || '').forEach(function (n) {
+            if (!exclude[n]) {
+                groups.push([n]);
+            }
+        });
         return groups;
     }
 
@@ -304,10 +380,33 @@
         return box ? Boolean(box.checked) : true;
     }
 
+    /** "0-1:0.45;2-4:-0.3" → {"0-1": 0.45, "2-4": -0.3} */
+    function parseCorrelations(text) {
+        const out = {};
+        String(text || '').split(/[;；]/).forEach(function (chunk) {
+            const part = chunk.trim();
+            if (!part) {
+                return;
+            }
+            const cut = part.lastIndexOf(':');
+            if (cut <= 0) {
+                return;
+            }
+            const key = part.slice(0, cut).trim().replace(/[,_，]/g, '-');
+            const value = parseFloat(part.slice(cut + 1));
+            if (!isFinite(value)) {
+                return;
+            }
+            out[key] = Math.max(-0.98, Math.min(0.98, value));
+        });
+        return out;
+    }
+
     function fillSelect(select, items, placeholder) {
         if (!select) {
             return;
         }
+        const previous = select.value;
         select.innerHTML = '';
         const first = document.createElement('option');
         first.value = '';
@@ -319,15 +418,45 @@
             option.textContent = item.label;
             select.appendChild(option);
         });
+        if (previous && items.some(function (item) { return String(item.value) === previous; })) {
+            select.value = previous;
+        }
     }
 
     function render(force) {
+        try {
+            renderInner(force);
+        } catch (error) {
+            const status = $('goalStatus');
+            if (status) {
+                status.textContent = '配置面板渲染出错：' + (error && error.message ? error.message : error);
+                status.style.color = '#b02a37';
+            }
+            if (window.console) {
+                console.error('[goal-panel] render 失败', error);
+            }
+        }
+    }
+
+    function renderInner(force) {
         const list = questions();
         const sig = signature(list) + '|' + list.map(function (q) { return q.rows.length; }).join(',');
         if (!force && sig === lastSignature) {
             return;
         }
         lastSignature = sig;
+
+        // 重建前先记住当前选择：面板每 1.5 秒会重渲染一次，
+        // 不还原的话，导入或手选的因素会被下一次重渲染全部冲掉。
+        const keepOutcome = ($('goalOutcome') || {}).value || '';
+        const keepPositive = ($('goalPositive') || {}).value || '';
+        const keepFactors = [];
+        document.querySelectorAll('#goalFactors input[data-qid]').forEach(function (box) {
+            if (box.checked) {
+                const sel = document.querySelector('#goalFactors select[data-dir="' + box.dataset.qid + '"]');
+                keepFactors.push([box.dataset.qid, (sel && sel.value) || '+']);
+            }
+        });
 
         // 结局可以是：单选题、量表题，或矩阵题的任意一行
         // （整道矩阵不行——一题多行=多个变量，结局必须收成一个数）
@@ -374,7 +503,36 @@
             });
         }
 
+        // 还原结局与因素（outcome 必须先声明，否则 TDZ 报错）
         const outcome = $('goalOutcome');
+        if (outcome && keepOutcome) {
+            const exists = Array.prototype.some.call(outcome.options, function (opt) {
+                return opt.value === keepOutcome;
+            });
+            if (exists) {
+                outcome.value = keepOutcome;
+                if (typeof outcome.onchange === 'function') {
+                    outcome.onchange();
+                }
+                if (keepPositive) {
+                    const positive = $('goalPositive');
+                    if (positive) {
+                        positive.value = keepPositive;
+                    }
+                }
+            }
+        }
+        keepFactors.forEach(function (pair) {
+            const box = document.querySelector('#goalFactors input[data-qid="' + pair[0] + '"]');
+            const sel = document.querySelector('#goalFactors select[data-dir="' + pair[0] + '"]');
+            if (box) {
+                box.checked = true;
+            }
+            if (sel) {
+                sel.value = pair[1];
+            }
+        });
+
         if (outcome) {
             outcome.onchange = function () {
                 const picked = selectedOutcome();
@@ -400,7 +558,9 @@
             });
         }
 
-        ['goalEnabled', 'goalAlpha', 'goalKmo', 'goalSig', 'goalAutoDim'].forEach(function (id) {
+        ['goalEnabled', 'goalAlpha', 'goalKmo', 'goalSig', 'goalAutoDim',
+            'goalCorrelations', 'goalModeration', 'goalOrdinal', 'goalEffect',
+            'goalReverse', 'goalMode'].forEach(function (id) {
             const el = $(id);
             if (el) {
                 el.addEventListener('change', sync);
@@ -411,6 +571,13 @@
         const toggle = $('goalEnabled');
         if (toggle) {
             toggle.addEventListener('change', toggleBody);
+        }
+        const modeSelect = $('goalMode');
+        if (modeSelect) {
+            modeSelect.addEventListener('change', function () {
+                applyMode();
+                sync();
+            });
         }
         applyOutcomeMode();
         toggleBody();
@@ -467,6 +634,28 @@
     }
 
     /** 采集当前配置，兼容老字段。 */
+    /** 有序题只能是单选题：填了矩阵/量表题号会覆盖那道题的答案。 */
+    function checkOrdinalInput() {
+        const warn = $('goalOrdinalWarn');
+        const input = $('goalOrdinal');
+        if (!warn || !input) {
+            return;
+        }
+        const values = parseRefList(input.value || '');
+        if (!values.length) {
+            warn.textContent = '';
+            return;
+        }
+        const list = questions();
+        const bad = values.filter(function (number) {
+            const hit = list.filter(function (q) { return String(q.id) === String(number); })[0];
+            return !hit || hit.type.indexOf('单选') < 0;
+        });
+        warn.textContent = bad.length
+            ? '这些不是单选题，填了会打乱结构：' + bad.join('、')
+            : '';
+    }
+
     function sync() {
         scheduleSave();
         const enabled = Boolean(($('goalEnabled') || {}).checked);
@@ -519,7 +708,10 @@
                 }
             }
         };
-        const legacyQuestion = items.length ? Math.floor(items[0] / 100) : 0;
+        // 整题编号（如 4）直接用；矩阵行编号（如 901）才需要 /100 反推题号
+        const legacyQuestion = items.length
+            ? (items[0] >= 100 ? Math.floor(items[0] / 100) : items[0])
+            : 0;
         shim('validitySwitch', enabled);
         shim('validityTarget', alpha.toFixed(2));
         shim('validityDimensions', dimensions.map(function (g) { return g.join('-'); }).join(';'));
@@ -549,6 +741,17 @@
                     + ' · ' + dimensions.length + ' 个维度'
                     + outcomeText
                     + ' · 因素 ' + predictors.length + ' 个'
+                : '';
+        }
+
+        checkOrdinalInput();
+
+        const constructsHint = $('goalConstructs');
+        if (constructsHint) {
+            constructsHint.textContent = dimensions.length
+                ? '构念编号：' + dimensions.map(function (group, index) {
+                    return index + '=[' + group.join(',') + ']';
+                }).join('　')
                 : '';
         }
 
@@ -610,21 +813,34 @@
 
         const picked = selectedOutcome();
         const positiveRaw = parseInt(($('goalPositive') || {}).value, 10) || 0;
+        // 「只要信效度」模式：不下发结局与自变量，只做测量层
+        const mode = ($('goalMode') || {}).value || 'full';
+        const onlyReliability = mode === 'basic';
+        const sentItems = onlyReliability ? [] : items;
+        const sentPredictors = onlyReliability ? [] : predictors;
+        const sentDirections = onlyReliability ? {} : directions;
         return {
             enabled: true,
             alpha_target: parseFloat(($('goalAlpha') || {}).value) || 0.85,
             dimensions: dimensions,
-            reverse: [],
-            dimension_correlation: 0.45,
+            reverse: parseRefList(($('goalReverse') || {}).value || ''),
+            dimension_correlation: parseFloat(($('goalDefaultCorr') || {}).value) || 0.30,
+            // 构念间相关（带符号）：键为 "0-1" 这种构念索引对，来自答题表
+            dimension_correlations: parseCorrelations(
+                ($('goalCorrelations') || {}).value || ''
+            ),
+            target_effect: parseFloat(($('goalEffect') || {}).value) || 0.45,
+            ordinal_items: parseRefList(($('goalOrdinal') || {}).value || ''),
+            moderation: parseModeration(($('goalModeration') || {}).value || ''),
             kmo_target: parseFloat(($('goalKmo') || {}).value) || 0.70,
             // 新字段：结局项目（可含矩阵行、可多项目合成）
-            outcome_items: items,
+            outcome_items: sentItems,
             outcome_aggregate: outcomeAggregate(),
             // 旧字段保留：其它模块只想知道「结局是哪道题」
             outcome_question: picked ? parseInt(picked.question.id, 10) : 0,
             positive_options: positiveRaw ? [positiveRaw] : [],
-            predictors: predictors,
-            directions: directions,
+            predictors: sentPredictors,
+            directions: sentDirections,
             significant_required: parseInt(($('goalSig') || {}).value, 10) || 0,
             event_rate: 0.5,
             attempts: 12
@@ -681,6 +897,11 @@
 
     function boot() {
         ensureShims();
+        const build = document.querySelector('meta[name="wjx-build"]');
+        const buildEl = $('goalBuild');
+        if (build && buildEl) {
+            buildEl.textContent = 'build ' + build.getAttribute('content');
+        }
         if (!document.getElementById('goalEnabled')) {
             return;
         }

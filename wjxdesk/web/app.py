@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from wjxdesk.domain.enums import ItemKind
 from wjxdesk.domain.errors import WjxDeskError
 from wjxdesk.domain.strategy import Strategy, default_strategy
+from wjxdesk.protocol.proxy_probe import check as probe_proxy
 from wjxdesk.runtime.gate import estimate
 from wjxdesk.storage.settings import export_dir
 from wjxdesk.web.envelope import err, ok
@@ -63,6 +64,15 @@ def _survey_payload(survey: Any) -> dict[str, Any]:
 
 def _sse(event: Any) -> str:
     return f"event: progress\ndata: {json.dumps(event.to_wire(), ensure_ascii=False)}\n\n"
+
+
+def _stop_reason(handle: Any) -> str:
+    """任务停止原因（代理配置错误这类），用户手动停止时为空。"""
+    runner = getattr(handle, "runner", None)
+    try:
+        return runner.stop_reason
+    except Exception:
+        return ""
 
 
 def _goal_report(handle: Any) -> dict[str, Any] | None:
@@ -146,6 +156,19 @@ def create_app(ctx: AppContext, frontend_dir: Path, *, dev_reload: bool = False)
         except Exception as exc:
             return JSONResponse(err(f"体检失败：{exc}"))
 
+    @app.post("/api/proxy/check")
+    async def proxy_check(request: Request) -> Any:
+        """代理链路体检：提取一次 IP，并走它请求一次外网。只读、不消耗问卷额度。"""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        link = str((body or {}).get("link") or "").strip()
+        try:
+            return ok(await probe_proxy(link))
+        except Exception as exc:
+            return JSONResponse(err(f"代理检查失败：{exc}"))
+
     # -- 任务 ---------------------------------------------------------------
 
     @app.post("/api/tasks")
@@ -214,6 +237,7 @@ def create_app(ctx: AppContext, frontend_dir: Path, *, dev_reload: bool = False)
                 "reasons": ctx.store.reason_summary(task_id),
                 "records": ctx.store.records(task_id)[-200:],
                 "goal": _goal_report(handle),
+                "stop_reason": _stop_reason(handle),
             }
         )
 

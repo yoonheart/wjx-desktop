@@ -159,14 +159,20 @@ def test_outcome_scale_question_is_continuous() -> None:
     assert len(set(values)) > 2, "结局要是连续的，不能只有一两个档位"
 
 
-def test_outcome_excluded_from_reliability() -> None:
-    """因变量不能进 α 矩阵：结局项不应出现在维度里。"""
+def test_outcome_stays_inside_its_construct() -> None:
+    """因变量属于某个构念，必须和同构念的题一起进 α / 因子分析。
+
+    旧实现把结局项整体剔除出信度矩阵，导致它在 EFA 里"不属于自己的构念"；
+    新架构里结局只是一个被标记的构念，不再特殊对待。
+    """
     survey = _survey(matrix=True)
     goal = _matrix_goal(outcome_items=(6,))
     solver = GoalSolver(survey, Strategy(total=20, seed=7, goal=goal))
 
-    assert 6 not in solver.dimensions[0] + solver.dimensions[1]
-    assert 6 not in solver._analysis_numbers()
+    assert 6 in solver._analysis_numbers()
+    owner = [group for group in solver.dimensions if 6 in group]
+    assert owner, "结局项必须归属某个构念"
+
 
 
 def test_legacy_outcome_question_still_works() -> None:
@@ -237,8 +243,8 @@ def test_auto_dimensions_split_by_matrix_question() -> None:
         attempts=12,
     )
     solver = GoalSolver(_two_construct_survey(), Strategy(total=20, seed=5, goal=goal))
-    assert solver.dimensions == ((501, 502, 503, 504), (601, 603, 604), (7,))
-    assert 602 not in solver._analysis_numbers()
+    assert solver.dimensions == ((501, 502, 503, 504), (601, 602, 603, 604), (7,))
+    assert 602 in solver._analysis_numbers()
 
 
 def test_auto_dimensions_raise_kmo_and_keep_alpha() -> None:
@@ -281,3 +287,147 @@ def test_kmo_target_is_enforced() -> None:
     assert report.kmo < 0.99
 
 
+# --------------------------------------------------------------------------- 测量引擎
+
+
+def _five_construct_survey() -> Survey:
+    """5 个矩阵构念（含因变量）+ 4 道人口学题，贴近真实问卷。"""
+    items = [Item(number=i, kind=ItemKind.SINGLE, options=_opts(4)) for i in range(1, 5)]
+    for q in range(5, 10):
+        items.append(
+            Item(number=q, kind=ItemKind.MATRIX, options=_opts(), rows=_opts(4), low=1, high=5)
+        )
+    return Survey(token="t", items=tuple(items))
+
+
+def _path_goal(**kwargs) -> ResearchGoal:
+    base = dict(
+        enabled=True,
+        alpha_target=0.85,
+        kmo_target=0.70,
+        attempts=6,
+        outcome_items=(901, 902, 903, 904),
+        outcome_aggregate="mean",
+        predictors=(501, 601, 701, 801),
+        directions={501: "+", 601: "-", 701: "-", 801: "-"},
+        significant_required=4,
+    )
+    base.update(kwargs)
+    return ResearchGoal(**base)
+
+
+def test_signed_paths_are_negative_when_direction_is_minus() -> None:
+    """核心能力：方向写 - 时，数据里必须真的出现负相关。
+
+    旧实现只有一个正的 dimension_correlation，永远造不出负向路径。
+    """
+    survey = _five_construct_survey()
+    sheets, report = GoalSolver(
+        survey, Strategy(total=200, seed=20261105, goal=_path_goal())
+    ).solve(200)
+
+    assert report.achieved, report.notes
+    by_number = {item.number: item for item in report.predictors}
+    assert by_number[501].correlation > 0.20
+    for number in (601, 701, 801):
+        assert by_number[number].correlation < -0.15, (number, by_number[number])
+
+
+def test_all_constructs_meet_alpha() -> None:
+    survey = _five_construct_survey()
+    _, report = GoalSolver(
+        survey, Strategy(total=120, seed=7, goal=_path_goal())
+    ).solve(120)
+    assert report.alpha_by_construct
+    for name, value in report.alpha_by_construct:
+        assert 0.78 <= value <= 0.95, (name, value)
+
+
+def test_impossible_correlation_reports_shrinkage() -> None:
+    """相关矩阵自相矛盾时必须报告，不能静默把结构清零。"""
+    goal = _path_goal(
+        dimension_correlations={"0-1": -0.9, "0-2": -0.9, "1-2": 0.9},
+        attempts=2,
+    )
+    _, report = GoalSolver(
+        _five_construct_survey(), Strategy(total=60, seed=11, goal=goal)
+    ).solve(60)
+    assert any("收缩" in note for note in report.notes), report.notes
+
+
+def test_marginals_are_exact() -> None:
+    """给了选项占比就按它生成：只允许落在前两档。"""
+    goal = _path_goal(
+        marginals={501: (0.5, 0.5, 0.0, 0.0, 0.0)},
+        attempts=2,
+    )
+    sheets, _ = GoalSolver(
+        _five_construct_survey(), Strategy(total=80, seed=3, goal=goal)
+    ).solve(80)
+    levels = {dict(sheet.get(5).matrix)[1] for sheet in sheets}
+    assert levels <= {1, 2}, levels
+
+
+def test_generation_is_reproducible() -> None:
+    """同一 seed 两次生成的答案必须完全一致。"""
+    survey = _five_construct_survey()
+    first, _ = GoalSolver(
+        survey, Strategy(total=40, seed=99, goal=_path_goal())
+    ).solve(40)
+    second, _ = GoalSolver(
+        survey, Strategy(total=40, seed=99, goal=_path_goal())
+    ).solve(40)
+    assert [sheet.to_plain() for sheet in first] == [sheet.to_plain() for sheet in second]
+
+
+
+
+
+def test_moderation_interaction_becomes_significant() -> None:
+    """调节：把一条单选题声明为有序变量后，交互项要能显著。"""
+    goal = _path_goal(
+        ordinal_items=(4,),
+        moderation={"focal": 501, "moderator": 4, "effect": 0.30},
+    )
+    _, report = GoalSolver(
+        _five_construct_survey(), Strategy(total=250, seed=20261105, goal=goal)
+    ).solve(250)
+
+    assert report.interaction is not None
+    focal, moderator, beta, p_value = report.interaction
+    assert (focal, moderator) == (501, 4)
+    assert p_value < 0.05, (beta, p_value)
+    assert report.achieved, report.notes
+
+
+def test_reverse_item_is_flipped_in_statistics() -> None:
+    """反向题：原始答案与同维其它题负相关，翻转后 α 依然达标。"""
+    survey = Survey(
+        token="t",
+        items=(
+            Item(number=5, kind=ItemKind.MATRIX, options=_opts(), rows=_opts(4), low=1, high=5),
+        ),
+    )
+    goal = ResearchGoal(
+        enabled=True,
+        alpha_target=0.85,
+        kmo_target=0.70,
+        dimensions=((501, 502, 503, 504),),
+        reverse=(503,),
+        attempts=6,
+    )
+    sheets, report = GoalSolver(survey, Strategy(total=120, seed=21, goal=goal)).solve(120)
+    assert report.alpha >= 0.80, report.notes
+
+    def column(row: int) -> list[float]:
+        return [float(dict(sheet.get(5).matrix)[row]) for sheet in sheets]
+
+    def corr(a: list[float], b: list[float]) -> float:
+        n = len(a)
+        ma, mb = sum(a) / n, sum(b) / n
+        num = sum((x - ma) * (y - mb) for x, y in zip(a, b))
+        da = sum((x - ma) ** 2 for x in a) ** 0.5
+        db = sum((y - mb) ** 2 for y in b) ** 0.5
+        return num / (da * db) if da and db else 0.0
+
+    assert corr(column(1), column(3)) < -0.2, "反向题的原始分应与同维题负相关"

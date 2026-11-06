@@ -18,10 +18,14 @@ env/
 ENV/
 __pypackages__/
 
+# ---- 前端测试依赖（jsdom 装在本地，不入库）----
+node_modules/
+
 # ---- 构建 / 打包产物（不入库）----
 build/
 dist/
 release/
+*.zip
 *.spec
 !build_app.spec
 # 重命名留档的旧产物（dist.old / dist_new / 问卷星助手.old 之类）

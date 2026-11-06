@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    <meta name="wjx-build" content="20261106i">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>问卷解析结果</title>
@@ -248,8 +249,12 @@
                 <input type="text" id="apiUrl" class="form-control api-input"
                        placeholder="粘贴你自己的代理IP提取链接（留空则使用本机IP）">
             </span>
+            <button type="button" id="proxyCheckBtn" class="proxy-check-btn" disabled
+                    title="先粘贴提取链接，再用它检查">
+                检验
+            </button>
             <button type="button" id="proxyHelpBtn" class="btn btn-sm btn-link proxy-help-btn">
-                如何获取ip代理
+                如何获取
             </button>
         </div>
 
@@ -295,7 +300,7 @@
                 <label class="form-check-label" for="ipReuseSwitch">IP 复用</label>
             </div>
             <i class="fa fa-question-circle help-icon" aria-hidden="true"
-               data-tip="打开后，一个IP可填多份问卷，可以更省代理，但是最后刷的问卷数量会差目标问卷可能一部分！另外同一 IP 短时间内提交多份，更容易被风控检测到，导致要求人工验证甚至整批停止，建议 1~2 份/IP。"></i>
+               data-tip="一个IP可填多份问卷，可以更省代理同时速度更快，但是最后刷的问卷数量可能会差目标问卷一部分，另外更容易被风控，导致刷到一半被停止"></i>
             <span id="ipReuseGroup" class="grow field-inline is-hidden">
                 <input type="number" id="ipMaxUse" class="form-control time-input"
                        min="1" max="10" value="2" aria-label="每个IP填写份数">
@@ -354,6 +359,25 @@
             <span id="goalSummary" class="validity-hint" role="status"></span>
         </div>
 
+        <div id="goalModeGroup" class="is-hidden"
+             style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:2px 0 6px">
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalMode" style="margin:0">分析类型</label>
+                <select id="goalMode" style="width:170px;height:30px;font-size:13px;padding:2px 6px;border:1px solid #ddd;border-radius:6px">
+                    <option value="full">中介 / 调节（全部）</option>
+                    <option value="regression">只跑回归（直接效应）</option>
+                    <option value="basic">只要信效度</option>
+                </select>
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="按要做的分析筛掉用不到的配置：只要信效度就只留 α/KMO；跑回归再加因变量与自变量；做中介或调节才需要「相关 / 调节」。导入的答题表不会被删，只是暂时隐藏。"></i>
+            </span>
+            <span class="mono-label" style="color:#999">
+                ① 目标 → ② 因变量 → ③ 自变量 → ④ 关系（相关 / 调节）
+            </span>
+            <span id="goalBuild" class="mono-label" style="color:#c8c8c8;margin-left:auto"></span>
+            <div id="goalStatus" style="width:100%;font-size:12px;color:#0f6e56;line-height:1.6"></div>
+        </div>
+
         <div id="goalBodyGroup" class="is-hidden"
              style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:6px 0 8px">
             <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
@@ -406,11 +430,45 @@
             </span>
         </div>
 
+        <div id="goalRelationGroup" class="is-hidden"
+             style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:0 0 8px">
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalCorrelations" style="margin:0">相关</label>
+                <input id="goalCorrelations" type="text" placeholder="编号-编号:数值"
+                       style="width:250px;height:30px;padding:2px 6px;font-size:12px;border:1px solid #ddd;border-radius:6px">
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="构念之间的关系，可正可负。格式 编号-编号:数值;… 例如 0-4:+0.45;1-4:-0.45 表示 0 号与 4 号正相关、1 号与 4 号负相关。不写默认 +0.30。这是唯一能表达「负向影响」的地方。"></i>
+            </span>
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalModeration" style="margin:0">调节</label>
+                <input id="goalModeration" type="text" placeholder="项目*项目:数值"
+                       style="width:130px;height:30px;padding:2px 6px;font-size:12px;border:1px solid #ddd;border-radius:6px">
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="一条调节路径：自变量*调节变量:效应量。例如 501*4:0.30 表示第5题第1行 受 第4题 调节。调节变量必须是量表题或「有序题」里声明过的单选题。"></i>
+            </span>
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalOrdinal" style="margin:0">有序题</label>
+                <input id="goalOrdinal" type="text" placeholder="填单选题号"
+                       style="width:90px;height:30px;padding:2px 6px;font-size:12px;border:1px solid #ddd;border-radius:6px">
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="把普通单选题当成有序测量（如“使用时长 1~4 档”），填题号、逗号分隔。只填单选题——矩阵题、量表题自带行号，填整题号会覆盖它们的数据。"></i>
+                <span id="goalOrdinalWarn" style="color:#b02a37;font-size:12px"></span>
+            </span>
+            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                <label class="mono-label" for="goalReverse" style="margin:0">反向题</label>
+                <input id="goalReverse" type="text" placeholder="填项目编号"
+                       style="width:110px;height:30px;padding:2px 6px;font-size:12px;border:1px solid #ddd;border-radius:6px">
+                <i class="fa fa-question-circle help-icon" aria-hidden="true"
+                   data-tip="选项方向与其它题相反的题（别人是“满意→不满意”，它是“不满意→满意”）。填项目编号、逗号分隔。生成时它会反向取分，统计时也按反向计分后的分数算 α/KMO，等价于你在 SPSS 里做 6-x。"></i>
+            </span>
+            <div id="goalConstructs" class="validity-hint" style="width:100%;margin-top:2px" role="status"></div>
+        </div>
+
         <div id="goalFactorGroup" class="is-hidden" style="display:block;padding:0 0 10px">
             <div style="width:100%">
                 <label class="mono-label" style="display:block;margin-bottom:2px">影响因素（自变量）</label>
                 <div style="color:#999;font-size:12px;margin-bottom:6px">
-                    勾选你想让它「显著」的项目并选方向。矩阵题按行拆开（如 第5题(颜值)、第5题(性格)），可以分别设方向。正向=分越高越容易得到正面结局，负向=越不容易，不显著=故意让它没关系。
+                    <strong>勾选</strong>你想让它「显著」的项目并选方向。矩阵题按行拆开（如 第5题(颜值)、第5题(性格)），可以分别设方向。正向=分越高越容易得到正面结局，负向=越不容易，不显著=故意让它没关系。
                 </div>
                 <div id="goalFactors"
                      style="display:flex;flex-wrap:wrap;gap:8px 18px;max-height:190px;overflow:auto;padding:4px 2px"></div>
@@ -430,7 +488,8 @@
         <div class="modal-body">
             <h6>1. 先把答案配好</h6>
             <p>如果你不会配置信效度或者显著数，可以点「导出答题表」，
-                把导出的 CSV 文件交给 AI 修改。要求不同时，改一下提示词即可。</p>
+                把导出的 CSV 连同下面的提示词模板一起交给 AI 修改。要求不同时，
+                只改模板里的【我的研究目标】即可。</p>
 
             <div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0 14px">
                 <button type="button" class="btn" id="quickExportCsv"
@@ -448,10 +507,16 @@
                 可以只保留要改的题，没出现的题保持原样。
             </p>
 
-            <h6 style="margin-top:16px">2. 让 AI 帮你配（附示例提示词）</h6>
+            <h6 style="margin-top:16px">2. 让 AI 帮你配（附通用提示词模板）</h6>
             <p style="margin-bottom:8px">
-                例：假如我想要问卷信效度 0.85，且跑模型出 2 个显著，
-                可以用如下提示词，直接带着 CSV 文件发给 AI：
+                例：假如我想要各维度信效度达标、且同一维度的题在因子分析里落在同一列，
+                把下方模板里【我的研究目标】的 <code>___</code> 换成你的具体数值即可，
+                其余规则不用改；这份模板对任何问卷都通用。
+            </p>
+            <p class="modal-note" style="margin-top:0;margin-bottom:8px">
+                <strong>最容易忽略的两点</strong>：① <code>___</code> 没替换就发出去，
+                AI 会自己编目标；② 必须把 CSV 和这段提示词<strong>一起</strong>发给 AI，
+                只发 CSV 会缺少编号规则与优先级约定，很容易改错。
             </p>
 
             <div id="aiPromptBox" style="position:relative;margin:10px 0 14px">
@@ -581,9 +646,9 @@
 <script src="/static/js/request.js"></script>
 <script src="/static/js/api.js"></script>
 <script src="/static/js/alert.js"></script>
-<script src="/static/js/probability-validator.js"></script>
-<script src="/static/js/answers-csv.js"></script>
-    <script src="/static/js/goal-panel.js"></script>
+<script src="/static/js/probability-validator.js?v=20261106i"></script>
+<script src="/static/js/answers-csv.js?v=20261106i"></script>
+    <script src="/static/js/goal-panel.js?v=20261106i"></script>
     <script src="/static/js/analysis.js"></script>
 <!-- 软件自带确认框（含桌面端关窗钩子）：后加载以覆盖 analysis.js 内的旧版 -->
 <script src="/static/js/confirm.js"></script>

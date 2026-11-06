@@ -32,6 +32,7 @@ from wjxdesk.engine.synthesis import Synthesizer
 from wjxdesk.engine.validity import build_plan, draw_factors
 from wjxdesk.engine.unique_pool import UniquePool
 from wjxdesk.protocol.contracts import WireRequest
+from wjxdesk.domain.errors import ProxyConfigError
 from wjxdesk.protocol.proxy import ExitPool
 from wjxdesk.runtime.gate import inspect_batch
 from wjxdesk.runtime.pacing import Pacer
@@ -96,6 +97,11 @@ class TaskRunner:
 
     def request_stop(self) -> None:
         self._stop.set()
+
+    @property
+    def stop_reason(self) -> str:
+        """任务为什么停：空串表示用户手动停止或正常结束。"""
+        return getattr(self, "_stop_reason", "")
 
     @property
     def stopped(self) -> bool:
@@ -382,6 +388,13 @@ class TaskRunner:
 
         try:
             exit_node = await self.pool.acquire_waiting()
+        except ProxyConfigError as exc:
+            # 白名单/额度/鉴权问题：等多久都不会好，立即停并留下原因
+            logger.error("代理配置错误，任务立即停止：%s", exc)
+            self._mark(unit, seed, UnitState.FATAL, FailureKind.EXIT_UNUSABLE, str(exc))
+            self._stop_reason = str(exc)
+            self.request_stop()
+            return
         except Exception as exc:
             # 拿不到出口不代表整批失败：把这一份退回队列，等别人腾出配额再试。
             self._pool_misses += 1
