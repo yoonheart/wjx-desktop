@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,17 @@ def _goal_report(handle: Any) -> dict[str, Any] | None:
 def create_app(ctx: AppContext, frontend_dir: Path, *, dev_reload: bool = False) -> FastAPI:
     app = FastAPI(title="wjx-desktop", docs_url=None, redoc_url=None)
 
+    # 本地单用户桌面应用：接口不认用户，只认「这是不是我们自己开的那个页面」。
+    # 启动时生成一次性令牌，首个页面响应里种成 HttpOnly cookie；别的进程/网页
+    # 拿不到这个 cookie，就碰不到 /api/* 下的任务创建、读取、停止等操作。
+    session_token = secrets.token_urlsafe(32)
+
+    @app.middleware("http")
+    async def require_session(request: Request, call_next: Any) -> Any:
+        if request.url.path.startswith("/api/") and request.cookies.get("wjx_session") != session_token:
+            return JSONResponse(err("未授权"), status_code=401)
+        return await call_next(request)
+
     @app.middleware("http")
     async def no_store_static(request: Request, call_next: Any) -> Any:
         """界面资源一律禁缓存。
@@ -114,8 +126,11 @@ def create_app(ctx: AppContext, frontend_dir: Path, *, dev_reload: bool = False)
         if not page.exists():
             return JSONResponse(err("前端文件缺失"))
         if dev_reload and inject_dev:
-            return HTMLResponse(inject(page.read_text(encoding="utf-8")))
-        return FileResponse(page)
+            response = HTMLResponse(inject(page.read_text(encoding="utf-8")))
+        else:
+            response = FileResponse(page)
+        response.set_cookie("wjx_session", session_token, httponly=True, samesite="strict")
+        return response
 
     @app.get("/")
     async def index() -> Any:
