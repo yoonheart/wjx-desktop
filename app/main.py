@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 import threading
 from pathlib import Path
@@ -17,6 +18,7 @@ import uvicorn
 from wjxdesk.domain.strategy import default_strategy
 from wjxdesk.shell.branding import set_app_id
 from wjxdesk.shell.guard import DEFAULT_PORT, port_in_use, wait_until_ready
+from wjxdesk.shell.motw import clear_executable_mark, clear_network_marks
 from wjxdesk.shell.window import Window
 from wjxdesk.storage.db import Store
 from wjxdesk.storage.settings import data_dir, db_path, load_profile, log_dir
@@ -60,10 +62,18 @@ def _ensure_std_streams() -> None:
 def main(argv: list[str] | None = None) -> int:
     _ensure_std_streams()
 
+    # 必须赶在 import webview 之前：从浏览器下载的 zip 解压后，dll 带着
+    # 「来自网络」标记，pythonnet 加载 Python.Runtime.dll 会被 .NET 拒绝，
+    # 表现是一双击就崩，而且异常发生在日志初始化之前，什么都留不下。
+    cleared = clear_network_marks()
+    clear_executable_mark()
+
     # 任务栏身份先定下来，窗口才会用应用自己的图标而不是 python.exe 的
     set_app_id()
 
     log_file = setup_logging(log_dir())
+    if cleared:
+        logging.getLogger(__name__).info("已清除 %d 个文件的「来自网络」标记", cleared)
 
     parser = argparse.ArgumentParser(prog=APP_NAME_CN, description=f"{APP_NAME_CN} 桌面端")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
