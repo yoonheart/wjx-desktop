@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta name="wjx-build" content="20261106i">
+    <meta name="wjx-build" content="20261112d">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>问卷解析结果</title>
@@ -364,9 +364,9 @@
             <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
                 <label class="mono-label" for="goalMode" style="margin:0">分析类型</label>
                 <select id="goalMode" style="width:170px;height:30px;font-size:13px;padding:2px 6px;border:1px solid #ddd;border-radius:6px">
+                    <option value="basic" selected>只要信效度</option>
                     <option value="full">中介 / 调节（全部）</option>
                     <option value="regression">只跑回归（直接效应）</option>
-                    <option value="basic">只要信效度</option>
                 </select>
                 <i class="fa fa-question-circle help-icon" aria-hidden="true"
                    data-tip="按要做的分析筛掉用不到的配置：只要信效度就只留 α/KMO；跑回归再加因变量与自变量；做中介或调节才需要「相关 / 调节」。导入的答题表不会被删，只是暂时隐藏。"></i>
@@ -593,7 +593,7 @@
             <img class="tutorial-img" src="static/pictures/test/5.png"
                  alt="API提取" onclick="openImageViewer(this.src)" loading="lazy">
 
-            <h6>6. 套餐选送的20积分，提取数量1至3，数越大速度越快，稳定使用时长推荐3分钟，选择地区这里看你想要问卷是哪个地区给你填，你就选哪里，其余按我选的来就行，再点击生成API链接</h6>
+            <h6>6. 套餐选送的20积分，提取数量填1，稳定使用时长推荐3分钟，选择地区这里看你想要问卷是哪个地区给你填，你就选哪里，其余按我选的来就行，再点击生成API链接</h6>
             <img class="tutorial-img" src="static/pictures/test/6.png"
                  alt="生成API链接" onclick="openImageViewer(this.src)" loading="lazy">
 
@@ -647,7 +647,7 @@
 <script src="/static/js/api.js"></script>
 <script src="/static/js/alert.js"></script>
 <script src="/static/js/probability-validator.js?v=20261106i"></script>
-<script src="/static/js/answers-csv.js?v=20261106i"></script>
+<script src="/static/js/answers-csv.js?v=20261112d"></script>
     <script src="/static/js/goal-panel.js?v=20261106i"></script>
     <script src="/static/js/analysis.js"></script>
 <!-- 软件自带确认框（含桌面端关窗钩子）：后加载以覆盖 analysis.js 内的旧版 -->
