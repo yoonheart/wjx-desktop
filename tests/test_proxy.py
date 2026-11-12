@@ -79,3 +79,15 @@ def test_per_exit_quota_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ExitPoolEmpty):
         asyncio.run(take_two())
+
+
+def test_repeated_ip_is_billed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """提取链接重复返回同一个 IP 时，只算一次费用。"""
+    _patch_response(monkeypatch, "1.2.3.4:8080\n")
+    pool = ExitPool(link="http://example.invalid/get", per_exit_quota=4, allow_direct=False)
+    asyncio.run(pool.refresh())
+    first = pool.fetched_total
+    asyncio.run(pool.refresh())          # 同一个 IP 又来一次
+    asyncio.run(pool.refresh())
+    assert pool.size == 1
+    assert pool.fetched_total == first == 1, pool.fetched_total

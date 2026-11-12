@@ -276,12 +276,18 @@ class TaskRunner:
                     unit = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
-                before = self._counters.confirmed
+                # 用「这份自己有没有成功」来判断，不能拿全局成功数前后比较：
+                # 并发跑的时候，别的会话在我这份执行期间成功了，全局数就变了，
+                # 于是这一份失败也会被误判成成功，永远不补份（实测 43/50、44/50 卡住）。
+                before = len(self._records)
                 await one(unit)
+                this_ok = any(
+                    record.state is UnitState.CONFIRMED for record in self._records[before:]
+                )
                 # 只有这一份没成功才补，否则会把目标份数刷爆
                 if (
                     not self.stopped
-                    and self._counters.confirmed == before
+                    and not this_ok
                     and self._counters.confirmed < target
                     and next_unit <= max_attempts
                 ):
@@ -292,7 +298,20 @@ class TaskRunner:
         try:
             while True:
                 await asyncio.gather(*(worker() for _ in range(workers)))
-                if queue.empty() or self.stopped:
+                if self.stopped:
+                    break
+                # 目标 = 成功份数：队列空了但还没凑够成功数，就继续补
+                if queue.empty() and self._counters.confirmed < target and next_unit <= max_attempts:
+                    logger.info(
+                        "成功 %d/%d，继续补份（第 %d 次尝试）",
+                        self._counters.confirmed,
+                        target,
+                        next_unit,
+                    )
+                    queue.put_nowait(next_unit)
+                    next_unit += 1
+                    continue
+                if queue.empty():
                     break
         except asyncio.CancelledError:
             self.request_stop()

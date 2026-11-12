@@ -109,3 +109,58 @@ def test_success_resets_streak() -> None:
     state, failures = _run("10", total=3)
     assert state is TaskState.COMPLETED
     assert all(item == "" for item in failures)
+
+
+def test_failed_units_are_replenished_until_target() -> None:
+    """目标指的是「成功份数」：失败的份要补，直到成功数达标。"""
+    class FlakyBundle(FakeBundle):
+        def __init__(self) -> None:
+            super().__init__("10")           # 默认成功
+            self.calls = 0
+
+        async def submit(self, request, *, exit_addr: str = ""):
+            self.calls += 1
+            if self.calls <= 2:
+                # 前两次给一个「无法识别」的响应：不算成功、也不触发停止
+                return RawResponse(status_code=200, text="无关内容", exit_addr=exit_addr)
+            return RawResponse(status_code=200, text="10", exit_addr=exit_addr)
+
+    runner = TaskRunner(
+        task_id="t",
+        bundle=FlakyBundle(),
+        survey=SURVEY,
+        strategy=Strategy(total=3, concurrency=1, pacing=FAST_PACING),
+        pool=ExitPool(link=""),
+        pacer=Pacer(FAST_PACING, seed=1),
+    )
+    result = asyncio.run(runner.run())
+    assert result.counters.confirmed == 3, result.counters
+
+
+def test_replenish_survives_concurrent_success() -> None:
+    """并发时补份不能被「别人的成功」干扰（回归：44/50 卡住的根因）。"""
+    class RaceBundle(FakeBundle):
+        def __init__(self) -> None:
+            super().__init__("10")
+            self.calls = 0
+            self.lock = asyncio.Lock()
+
+        async def submit(self, request, *, exit_addr: str = ""):
+            async with self.lock:
+                self.calls += 1
+                mine = self.calls
+            if mine == 1:
+                await asyncio.sleep(0.2)     # 慢的这份会失败
+                return RawResponse(status_code=200, text="无关内容", exit_addr=exit_addr)
+            return RawResponse(status_code=200, text="10", exit_addr=exit_addr)
+
+    runner = TaskRunner(
+        task_id="t",
+        bundle=RaceBundle(),
+        survey=SURVEY,
+        strategy=Strategy(total=2, concurrency=2, pacing=FAST_PACING),
+        pool=ExitPool(link=""),
+        pacer=Pacer(FAST_PACING, seed=1),
+    )
+    result = asyncio.run(runner.run())
+    assert result.counters.confirmed == 2, result.counters

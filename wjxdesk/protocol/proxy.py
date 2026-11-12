@@ -243,9 +243,11 @@ class ExitPool:
         parsed = [e for e in (Exit.parse(line) for line in text.splitlines()) if e]
         async with self._lock:
             if parsed:
-                self.fetched_total += len(parsed)
                 known = {e.addr for e in self._exits}
                 fresh = [e for e in parsed if e.addr not in known]
+                # 只对「真正进池」的 IP 计费：提取链接在去重窗口里会重复返回
+                # 同一个地址，按返回条数记账会把一次提取算成好几次（实测虚高 50%）。
+                self.fetched_total += len(fresh)
                 if fresh:
                     self._exits.extend(fresh)
                 for item in parsed:
@@ -431,7 +433,7 @@ class ExitPool:
                 return
 
             fresh = [e for e in self._exits if e.addr not in before]
-            self.fetched_total += len(fresh)
+            # refresh() 里已经按新增 IP 记过账，这里只用来判断「补到了没有」
             # 新 IP 直接可用：把配额清零，避免沿用旧 IP 的计数
             for exit_node in fresh:
                 state = self._state.setdefault(exit_node.addr, _ExitState())
