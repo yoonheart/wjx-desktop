@@ -77,3 +77,9 @@ python -m venv .venv
 ## 📄 License
 
 本项目采用 **非商业使用许可证**，仅供个人学习、研究与免费使用，禁止商业用途。详见 [LICENSE](LICENSE)。
+
+## 💬 交流群
+
+QQ 群号：**1093553265**，有问题可以进群问。
+
+<img src="frontend/pictures/group/group.png" width="280" alt="问卷星助手交流群二维码">
