@@ -104,6 +104,11 @@
     }
 
     function saveNow() {
+        // 题目还没渲染出来时不要写存档：这时 payload 是空的，
+        // 启动阶段「读回配置 → 触发一次保存」会把上次的存档冲成空壳。
+        if (!questions().length) {
+            return;
+        }
         const text = JSON.stringify(snapshot());
         try {
             localStorage.setItem(storageKey(), text);
@@ -175,7 +180,6 @@
             }
         });
         toggleBody();
-        setTimeout(loadSaved, 0);
     }
 
     function loadSaved() {
@@ -438,6 +442,8 @@
         }
     }
 
+    let restoredSig = '';
+
     function renderInner(force) {
         const list = questions();
         const sig = signature(list) + '|' + list.map(function (q) { return q.rows.length; }).join(',');
@@ -581,6 +587,13 @@
         }
         applyOutcomeMode();
         toggleBody();
+        // 面板建好后把上次保存的配置读回来。
+        // 以前 loadSaved 只被 restore 调用、restore 又只被 loadSaved 调用，
+        // 两边互引但没有任何入口，于是每次启动都是 HTML 默认值（开关被"重置"）。
+        if (restoredSig !== sig) {
+            restoredSig = sig;
+            setTimeout(loadSaved, 0);
+        }
     }
 
     /** 按结局类型切换可见控件：连续结局不需要「算作正面」，矩阵行才给「合并各行」。 */
@@ -920,6 +933,6 @@
         }
     }, 1500);
 
-    window.GoalPanel = { sync: sync, payload: payload, render: render };
+    window.GoalPanel = { sync: sync, payload: payload, render: render, restore: loadSaved };
     window.showGoalReport = showGoalReport;
 })();

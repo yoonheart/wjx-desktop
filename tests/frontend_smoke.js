@@ -165,5 +165,9 @@ assert(doc.querySelector('#goalFactors input[data-qid="501"]').checked,
     '重渲染后因素勾选丢失');
 assert(errors.length === 0, '导入后产生脚本异常：' + errors.join(' | '));
 
-console.log('OK: render 无异常、导入生效、重渲染不丢勾选');
+
+// 数据目标配置要能在启动时读回（restore 必须对外暴露）
+assert(typeof win.GoalPanel.restore === 'function', 'GoalPanel 没有暴露 restore，启动时读不回配置');
+
+console.log('OK: render 无异常、导入生效、重渲染不丢勾选、进度面板可复位');
 win.close();

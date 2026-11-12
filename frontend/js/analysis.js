@@ -5201,6 +5201,40 @@ function generateRandomSumTo100(count) {
 let sse = null;
 let currentTaskId = null;
 
+/** 把进度面板还原成「刚开始跑」的样子。
+ *
+ *  上一轮以停止/失败收尾时，标题的 is-failed/is-stopped、进度条的 is-failed、
+ *  停止按钮的「返回配置」文案和 onclick 都会留在 DOM 上；新任务直接复用面板
+ *  就会显示成「红色 正在刷问卷 + 返回配置」，看着像结束了其实还在刷。
+ */
+function resetProgressPanel() {
+    const title = document.getElementById('progressTitle');
+    if (title) {
+        title.className = 'progress-head';
+        title.innerHTML = '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 正在准备…';
+    }
+    const bar = document.getElementById('progressBar');
+    if (bar) {
+        bar.className = 'progress-fill';
+        bar.style.width = '0%';
+    }
+    const btn = document.getElementById('stopButton');
+    if (btn) {
+        btn.className = 'btn btn-danger';
+        btn.innerHTML = '<i class="fa fa-stop" aria-hidden="true"></i> 停止任务';
+        btn.onclick = stopTask;
+    }
+    const done = document.getElementById('completedCount');
+    if (done) {
+        done.textContent = '0';
+    }
+    const percent = document.getElementById('percentDisplay');
+    if (percent) {
+        percent.textContent = '0';
+    }
+}
+window.resetProgressPanel = resetProgressPanel;
+
 function startProgressMonitoring(taskId) {
     currentTaskId = taskId;
     const analysisContent = document.getElementById('analysisContent');
@@ -5216,6 +5250,9 @@ function startProgressMonitoring(taskId) {
         const node = document.getElementById(id);
         if (node) { node.remove(); }
     });
+
+    resetProgressPanel();
+
 
     // 从系统配置获取目标份数（输入框的值）
     const targetCount = parseInt(document.getElementById('targetCount').value);
