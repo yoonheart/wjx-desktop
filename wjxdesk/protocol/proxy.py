@@ -145,8 +145,6 @@ class Exit:
 @dataclass(slots=True)
 class _ExitState:
     used: int = 0
-    # 这个出口绑给了哪个会话：一个会话一个 IP，别的会话不能抢
-    owner: str = ""
     blocked_until: float = 0.0
     failures: int = 0
 
@@ -311,7 +309,7 @@ class ExitPool:
             f"当前可用 {usable} 个{wait}"
         )
 
-    async def acquire_waiting(self, max_wait_s: float = 60.0, owner: str = "") -> "Exit":
+    async def acquire_waiting(self, max_wait_s: float = 60.0) -> "Exit":
         """取出口。
 
         取不到时按这个顺序处理，而不是直接判整批失败：
@@ -319,13 +317,13 @@ class ExitPool:
         2. 配了提取链接 → 重新拉一批（同一个 IP 用不成就换一个）。
         """
         try:
-            return await self.acquire(owner)
+            return await self.acquire()
         except ExitPoolEmpty as exc:
             deadline = time.time() + max(0.0, max_wait_s)
             while time.time() < deadline:
                 await self._maybe_refill()
                 try:
-                    return await self.acquire(owner)
+                    return await self.acquire()
                 except ExitPoolEmpty:
                     await asyncio.sleep(1.0)
             raise ExitPoolEmpty(
@@ -466,7 +464,7 @@ class ExitPool:
             f"池内剩余 {remain} 个"
         )
 
-    async def acquire(self, owner: str = "") -> Exit:
+    async def acquire(self) -> Exit:
         now = time.time()
         async with self._lock:
             if not self._exits:
@@ -488,17 +486,13 @@ class ExitPool:
                     return candidate
                 if state.blocked_until > now or state.used >= self.per_exit_quota:
                     continue
-                # 已经被别的会话绑走的出口，不能给当前会话用
-                if state.owner and state.owner != owner:
-                    continue
-                # 复用优先：先用掉已经开过工（但没用满配额）的出口
+                # 复用优先：先用掉已经开过工的出口，把它用到配额上限再换新的
                 if best is None or state.used > best[0]:
                     best = (state.used, index)
 
             if best is not None:
                 chosen = self._exits[best[1]]
                 state = self._state[chosen.addr]
-                state.owner = owner
                 state.used += 1
                 self.used_total += 1
                 # 配额用尽 → 立刻从池子里移除（真正的「用完就丢」）

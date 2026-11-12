@@ -79,17 +79,3 @@ def test_per_exit_quota_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ExitPoolEmpty):
         asyncio.run(take_two())
-
-
-def test_sessions_do_not_share_one_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """一个会话一个 IP：别的会话不能抢已经绑定的出口。"""
-    _patch_response(monkeypatch, "1.1.1.1:80\n2.2.2.2:90\n")
-    pool = ExitPool(link="http://example.invalid/get", per_exit_quota=4, allow_direct=False)
-    asyncio.run(pool.refresh())
-
-    a = asyncio.run(pool.acquire(owner="sessionA"))
-    b = asyncio.run(pool.acquire(owner="sessionB"))
-    assert a.addr != b.addr, "两个会话拿到了同一个 IP"
-
-    again = asyncio.run(pool.acquire(owner="sessionA"))
-    assert again.addr == a.addr, "同一会话应继续用自己的 IP（复用）"

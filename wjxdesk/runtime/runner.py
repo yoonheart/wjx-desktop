@@ -54,16 +54,6 @@ logger = logging.getLogger("wjxdesk.runner")
 error_log = logging.getLogger("wjxdesk.errors")
 
 
-@dataclass(slots=True)
-class _Session:
-    """一个会话 = 一个并发位，绑定自己的出口 IP。
-
-    复用是「这个会话拿自己的 IP 再填几份」，不是「多个会话抢同一个 IP」。
-    """
-
-    id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
-
-
 @dataclass
 class RunResult:
     task_id: str
@@ -174,23 +164,26 @@ class TaskRunner:
         capacity = self.strategy.concurrency
         prefetch = getattr(self.pool, "prefetch", None)
         if callable(prefetch):
-            # 一个会话要一个出口：倍速 8 就备 8 个 IP，复用只决定
-            # 「这个会话的 IP 能连填几份」，不再让多个会话共用一个 IP。
+            # 需要的 IP 数 = 本次要提交的份数 / 每 IP 份数（向上取整）。
+            # 开「IP 复用」时不该一次抓满并发数，否则每个 IP 还是只用一次。
+            ip_quota = max(1, int(self.strategy.pacing.per_exit_quota))
             units = min(self.strategy.total, self.strategy.concurrency)
-            want = max(1, units)
+            want = max(1, math.ceil(units / ip_quota))
             try:
                 got = await prefetch(want)
             except Exception:
                 got = getattr(self.pool, "size", 0)
-            # 会话数受出口数限制：没有 IP 的会话只能干等
+            cap_fn = getattr(self.pool, "capacity", None)
+            limit = cap_fn() if callable(cap_fn) else got * self.strategy.pacing.per_exit_quota
             if got:
-                capacity = min(self.strategy.concurrency, got)
+                capacity = min(self.strategy.concurrency, limit)
                 if capacity < self.strategy.concurrency:
                     logger.warning(
-                        "出口不足：会话数从 %d 降到 %d（只拿到 %d 个 IP）",
+                        "出口不足：并发从 %d 降到 %d（池内 %d 个出口 × 每出口 %d 份）",
                         self.strategy.concurrency,
                         capacity,
                         got,
+                        self.strategy.pacing.per_exit_quota,
                     )
         self._effective_concurrency = max(1, capacity)
         size_now = getattr(self.pool, "size", 0)
@@ -261,13 +254,11 @@ class TaskRunner:
         if callable(diagnose):
             logger.info("出口池：%s", diagnose())
 
-        async def one(unit: int, session: "_Session") -> None:
+        async def one(unit: int) -> None:
             async with gate:
                 if self.stopped:
                     return
-                await self._execute_unit(
-                    unit, seed, controller, pools, quota, sheets_for_diag, plan, session
-                )
+                await self._execute_unit(unit, seed, controller, pools, quota, sheets_for_diag, plan)
 
         # 补份：某份失败就自动追加一份，直到成功数达到目标。
         # 上限是目标的 3 倍，避免风控全灭时无限重试。
@@ -278,7 +269,7 @@ class TaskRunner:
             queue.put_nowait(unit)
         next_unit = target + 1
 
-        async def worker(session: "_Session") -> None:
+        async def worker() -> None:
             nonlocal next_unit
             while not self.stopped:
                 try:
@@ -286,7 +277,7 @@ class TaskRunner:
                 except asyncio.QueueEmpty:
                     return
                 before = self._counters.confirmed
-                await one(unit, session)
+                await one(unit)
                 # 只有这一份没成功才补，否则会把目标份数刷爆
                 if (
                     not self.stopped
@@ -300,7 +291,7 @@ class TaskRunner:
         workers = max(1, min(self._effective_concurrency, target * 2))
         try:
             while True:
-                await asyncio.gather(*(worker(_Session()) for _ in range(workers)))
+                await asyncio.gather(*(worker() for _ in range(workers)))
                 if queue.empty() or self.stopped:
                     break
         except asyncio.CancelledError:
@@ -358,9 +349,7 @@ class TaskRunner:
         quota: QuotaBalancer,
         diag: list[AnswerSheet],
         plan: object,
-        session: _Session | None = None,
     ) -> None:
-        session = session or _Session()
         await self._stagger(unit)
 
         if self._synth_queue:
@@ -398,7 +387,7 @@ class TaskRunner:
             return
 
         try:
-            exit_node = await self.pool.acquire_waiting(owner=session.id)
+            exit_node = await self.pool.acquire_waiting()
         except ProxyConfigError as exc:
             # 白名单/额度/鉴权问题：等多久都不会好，立即停并留下原因
             logger.error("代理配置错误，任务立即停止：%s", exc)
@@ -415,9 +404,7 @@ class TaskRunner:
                     unit, self._pool_misses, exc,
                 )
                 await asyncio.sleep(min(20.0, 2.0 + self._pool_misses * 0.5))
-                return await self._execute_unit(
-                    unit, seed, controller, pools, quota, diag, plan, session
-                )
+                return await self._execute_unit(unit, seed, controller, pools, quota, diag, plan)
 
             logger.warning("多次仍无可用出口，任务停止：%s", exc)
             self._mark(unit, seed, UnitState.FATAL, FailureKind.EXIT_UNUSABLE, str(exc))
