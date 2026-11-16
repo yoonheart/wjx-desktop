@@ -131,6 +131,7 @@ const csv = [
     '# 结局合成,single',
     '# 算作正面,',
     '# 影响因素,501:+,502:+,503:+,504:+,505:+',
+    '# 手工分维,501,502|503-505',
     '题号,题目,选项序号,选项文字,权重,题型',
     '4,总体满意度,1,O1,30,量表题',
     '4,总体满意度,2,O2,40,量表题',
@@ -149,6 +150,10 @@ assert(result.updated > 0, '没有任何权重被应用');
 assert(doc.getElementById('goalOutcome').value === '4', '结局项没有写入');
 assert(doc.querySelector('#goalFactors input[data-qid="501"]').checked,
     '影响因素 501 没有被勾上');
+assert(doc.getElementById('goalDims').value === '501,502|503-505',
+    '手工分维没有写入手工分维框：' + doc.getElementById('goalDims').value);
+assert(win.GoalPanel.payload().dimensions.length === 2,
+    '手工分维没有生效到维度分组');
 
 // 文本框：整题填空 '-' 与选项内填空 'oN' 都要写回文本答案池
 const blankPool = textStore.get('7_0') || [];

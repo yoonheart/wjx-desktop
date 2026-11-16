@@ -470,6 +470,15 @@
         if (settings['信度α']) setValue('goalAlpha', settings['信度α']);
         if (settings['效度KMO']) setValue('goalKmo', settings['效度KMO']);
         if (settings['至少显著']) setValue('goalSig', settings['至少显著']);
+        // 手工分维：想把一道矩阵题拆成两个维度时用，格式 1201-1209|1210,1211,1212
+        if (settings['手工分维'] !== undefined) {
+            const raw = String(settings['手工分维'] || '').trim();
+            const el = document.getElementById('goalDims');
+            if (el) {
+                el.value = raw;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
 
         // 默认相关：没在 # 相关 里点名的构念对用它
         if (settings['相关默认'] !== undefined) {

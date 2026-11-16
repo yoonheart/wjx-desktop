@@ -94,6 +94,7 @@
             kmo: ($('goalKmo') || {}).value || '0.75',
             sig: ($('goalSig') || {}).value || '0',
             autoDim: autoDimEnabled(),
+            dims: ($('goalDims') || {}).value || '',
             mode: ($('goalMode') || {}).value || 'full',
             outcome: ($('goalOutcome') || {}).value || '',
             mean: Boolean(($('goalOutcomeMean') || {}).checked),
@@ -142,6 +143,9 @@
         const autoBox = $('goalAutoDim');
         if (autoBox && state.autoDim !== undefined) {
             autoBox.checked = Boolean(state.autoDim);
+        }
+        if (state.dims !== undefined) {
+            set('goalDims', state.dims);
         }
         if (state.mode) {
             const modeBox = $('goalMode');
@@ -377,6 +381,43 @@
             }
         });
         return groups;
+    }
+
+    /** "1201-1209|1210,1211,1212" → [[1201,...,1209],[1210,1211,1212]] */
+    function parseDimGroups(text) {
+        const out = [];
+        String(text || '').split(/[|;；]/).forEach(function (chunk) {
+            const refs = [];
+            chunk.split(/[,\s、]+/).forEach(function (piece) {
+                const part = piece.trim();
+                if (!part) {
+                    return;
+                }
+                if (part.indexOf('-') > 0) {
+                    const bits = part.split('-');
+                    const a = parseInt(bits[0], 10);
+                    const b = parseInt(bits[1], 10);
+                    if (isFinite(a) && isFinite(b)) {
+                        const lo = Math.min(a, b);
+                        const hi = Math.max(a, b);
+                        if (hi - lo <= 200) {
+                            for (let n = lo; n <= hi; n += 1) {
+                                refs.push(n);
+                            }
+                        }
+                    }
+                    return;
+                }
+                const value = parseInt(part, 10);
+                if (value > 0) {
+                    refs.push(value);
+                }
+            });
+            if (refs.length) {
+                out.push(refs);
+            }
+        });
+        return out;
     }
 
     function autoDimEnabled() {
@@ -809,9 +850,17 @@
             }
         });
 
-        const dimensions = autoDimEnabled()
-            ? autoDimensionGroups(exclude)
-            : (scorable.length ? [scorable] : []);
+        // 手工分维优先：只保留真正可计分的项目（结局项已被排除）
+        const manualDims = parseDimGroups(($('goalDims') || {}).value || '')
+            .map(function (group) {
+                return group.filter(function (n) { return scorable.indexOf(n) >= 0; });
+            })
+            .filter(function (group) { return group.length; });
+        const dimensions = manualDims.length
+            ? manualDims
+            : (autoDimEnabled()
+                ? autoDimensionGroups(exclude)
+                : (scorable.length ? [scorable] : []));
 
         const predictors = [];
         const directions = {};
