@@ -44,6 +44,14 @@ class WjxClassifier:
         text = (response.text or "").strip()
         code = _leading_code(text)
 
+        # 「答案不符合要求」= 本地编码/配置与问卷结构对不上，重试再多次也不会好。
+        # 归为 FORMAT，让上层像 407 那样立即停批，避免整批无效提交。
+        if self._hit(text, self._spec.invalid_answer):
+            return SubmissionOutcome(
+                Verdict.FORMAT,
+                FailureKind.FORMAT,
+                "提交的答案不符合要求：检查题型编码与必答配置，" + _snippet(text),
+            )
         if code in self.CODE_NEED_VERIFY or self._hit(text, self._spec.need_verify):
             return SubmissionOutcome(Verdict.NEED_VERIFY, FailureKind.NEED_VERIFY, _snippet(text))
         if code in self.CODE_SUCCESS:

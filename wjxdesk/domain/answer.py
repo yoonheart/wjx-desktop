@@ -93,7 +93,7 @@ def blank_numbers(survey_items: tuple[Item, ...], sheet: AnswerSheet) -> tuple[i
     """找出被逻辑跳过而留空的题号，供编码层生成跳过占位。"""
     skipped: list[int] = []
     for item in survey_items:
-        if item.kind in {ItemKind.SCALE, ItemKind.MATRIX}:
+        if item.kind in {ItemKind.SCALE, ItemKind.MATRIX, ItemKind.MATRIX_RATING}:
             continue
         ans = sheet.get(item.number)
         if ans is None or ans.is_empty():

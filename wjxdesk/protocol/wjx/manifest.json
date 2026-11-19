@@ -12,6 +12,9 @@
     "required_class": "req",
     "matrix_table": "table.matrixtable",
     "matrix_header_row": "tr",
+    "matrix_rating_table": "table.matrix-rating",
+    "matrix_rating_row": "tr.rowtitletr",
+    "matrix_rating_input": "input.ui-slider-input",
     "kind_map": {
       "1": "blank",
       "2": "blank",
@@ -21,6 +24,7 @@
       "6": "matrix",
       "7": "dropdown",
       "8": "slider",
+      "9": "matrix_rating",
       "11": "rank"
     }
   },
@@ -83,6 +87,10 @@
       "上限",
       "已满",
       "达到"
+    ],
+    "invalid_answer": [
+      "答案不符合要求",
+      "提交的答案不符合"
     ]
   },
   "device_profiles": {

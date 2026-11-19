@@ -46,6 +46,9 @@ class ParseSpec:
     required_class: str = "req"
     matrix_table: str = "table.matrixtable"
     matrix_header_row: str = "tr"
+    matrix_rating_table: str = "table.matrix-rating"
+    matrix_rating_row: str = "tr.rowtitletr"
+    matrix_rating_input: str = "input.ui-slider-input"
     kind_map: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -67,6 +70,7 @@ class VerdictSpec:
     need_verify: tuple[str, ...] = ()
     closed: tuple[str, ...] = ()
     limit: tuple[str, ...] = ()
+    invalid_answer: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +103,7 @@ class Manifest:
                     need_verify=tuple(raw.get("verdict", {}).get("need_verify", ())),
                     closed=tuple(raw.get("verdict", {}).get("closed", ())),
                     limit=tuple(raw.get("verdict", {}).get("limit", ())),
+                    invalid_answer=tuple(raw.get("verdict", {}).get("invalid_answer", ())),
                 ),
                 device_profiles=dict(raw.get("device_profiles", {})),
                 source_tokens=tuple(raw.get("source_tokens", ())),

@@ -89,6 +89,33 @@ def _matrix(container: Tag, manifest: Manifest) -> tuple[list[Option], list[Opti
     return columns, row_labels
 
 
+def _matrix_rating(container: Tag, manifest: Manifest) -> tuple[list[Option], float | None, float | None]:
+    """矩阵滑块题：行标签来自 tr.rowtitletr，取值区间来自第一个滑块 input。
+
+    与 type=6 矩阵不同，这类题没有「列选项」——每行的答案是 0~100 的连续数值。
+    行顺序按 DOM 中的 rowid（滑块上的 rowid 属性）对齐，避免分组标题行打乱序号。
+    """
+    table = container.select_one(manifest.parse.matrix_rating_table)
+    if table is None:
+        return [], None, None
+
+    rows: list[Option] = []
+    for node in table.select(manifest.parse.matrix_rating_row):
+        label = _text(node)
+        if label:
+            rows.append(Option(index=len(rows) + 1, label=label))
+
+    low = high = None
+    first = container.select_one(manifest.parse.matrix_rating_input)
+    if first is not None:
+        try:
+            low = float(first.get("min", 0))
+            high = float(first.get("max", 100))
+        except (TypeError, ValueError):
+            low = high = None
+    return rows, low, high
+
+
 def _blank_count(container: Tag) -> int:
     return max(1, len(container.select("textarea, input[type=text]")))
 
@@ -182,12 +209,16 @@ def parse_survey(html: str, manifest: Manifest, *, origin: str = "", token: str 
                 options = _scale_rating(container)
             if not options and kind is ItemKind.SCALE:
                 options = _option_rows(container, manifest)
+        elif kind is ItemKind.MATRIX_RATING:
+            rows, low, high = _matrix_rating(container, manifest)
         elif kind is ItemKind.BLANK:
             blanks = _blank_count(container)
         elif kind is ItemKind.SLIDER:
             low, high = _slider_bounds(container)
 
         if kind in {ItemKind.SINGLE, ItemKind.MULTI, ItemKind.SCALE, ItemKind.MATRIX} and not options:
+            continue
+        if kind is ItemKind.MATRIX_RATING and not rows:
             continue
 
         items.append(

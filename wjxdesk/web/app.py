@@ -33,6 +33,7 @@ _KIND_CN = {
     ItemKind.BLANK: "填空题",
     ItemKind.SCALE: "量表题",
     ItemKind.MATRIX: "矩阵题",
+    ItemKind.MATRIX_RATING: "矩阵量表",
     ItemKind.DROPDOWN: "下拉框",
     ItemKind.SLIDER: "滑块题",
     ItemKind.RANK: "排序题",

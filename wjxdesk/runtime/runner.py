@@ -48,6 +48,8 @@ MAX_VERIFY_STREAK = 3
 # 被要求验证时换 IP 重试几次。
 # 实测：换新 IP 仍然被要求验证，重试只会白烧 IP，所以默认不重试。
 MAX_VERIFY_RETRIES = 0
+# 连续多少份结果无法确认就停批：UNKNOWN 计入失败，不让它无限空转
+MAX_UNKNOWN_STREAK = 3
 
 logger = logging.getLogger("wjxdesk.runner")
 # 单独的错误日志：用户反馈问题时只需要发 errors.log
@@ -83,6 +85,7 @@ class TaskRunner:
     _all_sheets: list[AnswerSheet] = field(default_factory=list)
     _synth_queue: list[AnswerSheet] = field(default_factory=list)
     _verify_streak: int = 0
+    _unknown_count: int = 0
     _effective_concurrency: int = 1
     _stop_refills: int = 0
     _pool_misses: int = 0
@@ -516,6 +519,7 @@ class TaskRunner:
 
             if outcome.verdict is Verdict.SUCCESS:
                 self._verify_streak = 0
+                self._unknown_count = 0
                 release_ok = getattr(self.pool, "release", None)
                 if callable(release_ok):
                     release_ok(addr, ok=True)
@@ -567,6 +571,13 @@ class TaskRunner:
 
             if outcome.verdict is Verdict.UNKNOWN:
                 self._mark(unit, seed, UnitState.UNKNOWN, outcome.failure, outcome.detail, addr, ua, elapsed_ms, attempts - 1)
+                self._unknown_count += 1
+                # UNKNOWN 与 FATAL 一样计入失败；连续多份无法确认说明配置有问题，立刻停。
+                if self._unknown_count >= MAX_UNKNOWN_STREAK:
+                    self._finished_reason = f"连续 {self._unknown_count} 份结果无法确认，任务停止（最近：{outcome.detail}）"
+                    logger.error(self._finished_reason)
+                    error_log.error(self._finished_reason)
+                    self.request_stop()
                 return
 
             self._mark(unit, seed, UnitState.FATAL, outcome.failure, outcome.detail, addr, ua, elapsed_ms, attempts - 1)
@@ -574,6 +585,14 @@ class TaskRunner:
             release_bad = getattr(self.pool, "release", None)
             if callable(release_bad):
                 release_bad(addr, ok=False)
+
+            if outcome.verdict is Verdict.FORMAT:
+                # 答案编码/问卷结构不匹配：重试无意义，整批立刻停
+                self._finished_reason = outcome.detail
+                logger.error("任务因答案格式错误停止：%s", outcome.detail)
+                error_log.error("任务因答案格式错误停止：%s", outcome.detail)
+                self.request_stop()
+                return
 
             if outcome.failure is FailureKind.NEED_VERIFY:
                 # 单个 IP 被要求验证很常见，换出口往往就过；只有连续多份都过不去才判不可行

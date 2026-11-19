@@ -261,6 +261,33 @@ def pick_matrix(
     return ItemAnswer(number=item.number, matrix=tuple(pairs))
 
 
+def pick_matrix_rating(item: Item, rng: random.Random) -> ItemAnswer:
+    """矩阵滑块评分：每行在 [low, high] 内取一个整数值。
+
+    与 type=6 矩阵不同，这里没有「列」的概念，每行是一个连续评分。
+    用 Beta 形状向中段聚拢，再按行加噪声，既不像均匀随机，也不会整行同分。
+    """
+    low = float(item.low if item.low is not None else 0.0)
+    high = float(item.high if item.high is not None else 100.0)
+    if high < low:
+        low, high = high, low
+    rows = item.row_count or 1
+    pairs: list[tuple[int, int]] = []
+    for row in range(rows):
+        alpha = 1.2 + rng.random() * 1.6
+        beta = 1.2 + rng.random() * 1.6
+        position = rng.betavariate(alpha, beta)
+        value = int(round(low + position * (high - low)))
+        pairs.append((row + 1, max(int(low), min(int(high), value))))
+    if rows >= 3 and len({v for _, v in pairs}) == 1:
+        target = rng.randrange(rows)
+        row, value = pairs[target]
+        delta = max(1, int((high - low) * 0.15))
+        diff = delta if value + delta <= high else -delta
+        pairs[target] = (row, max(int(low), min(int(high), value + diff)))
+    return ItemAnswer(number=item.number, matrix=tuple(pairs))
+
+
 def pick_numeric(item: Item, rule: ItemRule, rng: random.Random) -> ItemAnswer:
     low = item.low if item.low is not None else 1.0
     high = item.high if item.high is not None else 5.0
@@ -344,6 +371,8 @@ def generate_sheet(
             answers[item.number] = pick_scale(item, rule, rng, z_item, latent, reverse=flip)
         elif item.kind is ItemKind.MATRIX:
             answers[item.number] = pick_matrix(item, rule, rng, z_item, latent, reverse=flip)
+        elif item.kind is ItemKind.MATRIX_RATING:
+            answers[item.number] = pick_matrix_rating(item, rng)
         elif item.kind is ItemKind.SLIDER:
             answers[item.number] = pick_numeric(item, rule, rng)
         elif item.kind is ItemKind.DROPDOWN:

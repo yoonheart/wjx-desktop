@@ -470,7 +470,16 @@
         if (settings['信度α']) setValue('goalAlpha', settings['信度α']);
         if (settings['效度KMO']) setValue('goalKmo', settings['效度KMO']);
         if (settings['至少显著']) setValue('goalSig', settings['至少显著']);
-        // 手工分维：想把一道矩阵题拆成两个维度时用，格式 1201-1209|1210,1211,1212
+
+        // 分维先设「自动」再设「手工」：反过来会被联动逻辑清空刚填的手工值。
+        if (settings['自动分维'] !== undefined) {
+            const autoBox = document.getElementById('goalAutoDim');
+            if (autoBox) {
+                autoBox.checked = settings['自动分维'] !== '否';
+                autoBox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+        // 手工分维：竖线分维度、逗号分项目、a-b 表示连续区间；留空=自动分维
         if (settings['手工分维'] !== undefined) {
             const raw = String(settings['手工分维'] || '').trim();
             const el = document.getElementById('goalDims');
@@ -557,6 +566,7 @@
             const autoBox = document.getElementById('goalAutoDim');
             if (autoBox) {
                 autoBox.checked = settings['自动分维'] !== '否';
+                // goal-panel 在 change 里会调用 applyDimMode 联动显示
                 autoBox.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }

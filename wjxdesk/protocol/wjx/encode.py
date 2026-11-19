@@ -82,6 +82,16 @@ class WjxEncoder:
             ]
             return spec.matrix_pair_sep.join(pairs)
 
+        if item.kind is ItemKind.MATRIX_RATING:
+            # type=9 矩阵滑块：每行是 0~100 的分值，行间用 ^ 分隔（线上 spChars[2]）。
+            # 例：15$1!85^2!70^3!60^4!90
+            if not answer.matrix:
+                return None
+            pairs = [
+                f"{row}{spec.matrix_row_sep}{int(value)}" for row, value in answer.matrix
+            ]
+            return spec.blank_sep.join(pairs)
+
         if item.kind in {ItemKind.SCALE, ItemKind.SLIDER}:
             if answer.scale is not None:
                 value = float(answer.scale)

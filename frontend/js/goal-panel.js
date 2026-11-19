@@ -147,6 +147,7 @@
         if (state.dims !== undefined) {
             set('goalDims', state.dims);
         }
+        applyDimMode();
         if (state.mode) {
             const modeBox = $('goalMode');
             if (modeBox) {
@@ -383,7 +384,7 @@
         return groups;
     }
 
-    /** "1201-1209|1210,1211,1212" → [[1201,...,1209],[1210,1211,1212]] */
+    /** "a-b|c,d" → [[a,...,b],[c,d]]；竖线分维度，逗号分项目，留空=自动分维 */
     function parseDimGroups(text) {
         const out = [];
         String(text || '').split(/[|;；]/).forEach(function (chunk) {
@@ -423,6 +424,31 @@
     function autoDimEnabled() {
         const box = $('goalAutoDim');
         return box ? Boolean(box.checked) : true;
+    }
+
+    /** 勾选自动分维时隐藏手工输入框（不清空，保留用户已填内容）。 */
+    function applyDimMode() {
+        const box = $('goalAutoDim');
+        const input = $('goalDims');
+        if (!box || !input) {
+            return;
+        }
+        const row = input.closest('.field-inline');
+        const label = row ? row.querySelector('label[for="goalDims"]') : null;
+        const tips = row ? row.querySelectorAll('i.help-icon') : [];
+        const hide = Boolean(box.checked);
+        // 只隐藏，不清空：CSV 导入/存档还原时手工值可能先于开关写入，
+        // 清空会把配置丢掉；payload() 已按 autoDimEnabled 决定是否采用 dims。
+        if (input.style) {
+            input.style.display = hide ? 'none' : '';
+        }
+        if (label && label.style) {
+            label.style.display = hide ? 'none' : '';
+        }
+        // 自动分维自己的提示仍显示，只隐藏手工分维那条（本行第二个 i）
+        if (tips.length >= 2 && tips[1].style) {
+            tips[1].style.display = hide ? 'none' : '';
+        }
     }
 
     /** "0-1:0.45;2-4:-0.3" → {"0-1": 0.45, "2-4": -0.3} */
@@ -609,10 +635,16 @@
             'goalCorrelations', 'goalModeration', 'goalOrdinal', 'goalEffect',
             'goalReverse', 'goalMode'].forEach(function (id) {
             const el = $(id);
-            if (el) {
-                el.addEventListener('change', sync);
-                el.addEventListener('input', sync);
+            if (!el) {
+                return;
             }
+            el.addEventListener('change', function () {
+                if (id === 'goalAutoDim') {
+                    applyDimMode();
+                }
+                sync();
+            });
+            el.addEventListener('input', sync);
         });
 
         const toggle = $('goalEnabled');
@@ -627,6 +659,7 @@
             });
         }
         applyOutcomeMode();
+        applyDimMode();
         toggleBody();
         // 面板建好后把上次保存的配置读回来。
         // 以前 loadSaved 只被 restore 调用、restore 又只被 loadSaved 调用，

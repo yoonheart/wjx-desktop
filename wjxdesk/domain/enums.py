@@ -16,6 +16,7 @@ class ItemKind(str, Enum):
     BLANK = "blank"
     SCALE = "scale"
     MATRIX = "matrix"
+    MATRIX_RATING = "matrix_rating"
     DROPDOWN = "dropdown"
     SLIDER = "slider"
     RANK = "rank"

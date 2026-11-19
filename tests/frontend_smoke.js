@@ -155,6 +155,20 @@ assert(doc.getElementById('goalDims').value === '501,502|503-505',
 assert(win.GoalPanel.payload().dimensions.length === 2,
     '手工分维没有生效到维度分组');
 
+// 自动分维勾选时隐藏手工框但不删值；取消勾选后恢复显示
+const autoBox = doc.getElementById('goalAutoDim');
+const dimsBox = doc.getElementById('goalDims');
+autoBox.checked = false;
+autoBox.dispatchEvent(new win.Event('change', { bubbles: true }));
+assert(dimsBox.style.display !== 'none', '手工分维应可见（自动分维未勾选）');
+autoBox.checked = true;
+autoBox.dispatchEvent(new win.Event('change', { bubbles: true }));
+assert(dimsBox.style.display === 'none', '勾选自动分维后手工框应隐藏');
+assert(dimsBox.value === '501,502|503-505', '隐藏不应清空已填的手工分维');
+autoBox.checked = false;
+autoBox.dispatchEvent(new win.Event('change', { bubbles: true }));
+assert(dimsBox.style.display !== 'none', '取消自动分维后手工框应恢复显示');
+
 // 文本框：整题填空 '-' 与选项内填空 'oN' 都要写回文本答案池
 const blankPool = textStore.get('7_0') || [];
 assert(blankPool.length === 2 && blankPool[0].text === '界面还可以再简洁',

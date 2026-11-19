@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta name="wjx-build" content="20261116a">
+    <meta name="wjx-build" content="20261119a">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>问卷解析结果</title>
@@ -402,14 +402,12 @@
                     自动分维
                 </label>
                 <i class="fa fa-question-circle help-icon" aria-hidden="true"
-                   data-tip="勾上：每道矩阵题算一个维度、每道量表题算一个维度（推荐）。6 个矩阵题会得到 6 个维度，每个维度 α 0.85、题项聚在自己因子上。不勾：所有题当成一个维度，α 会被摊薄，因子分析容易碎成多个弱因子。"></i>
-            </span>
-            <span class="field-inline" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+                   data-tip="勾上：每道矩阵题算一个维度、每道量表题算一个维度（推荐）。不勾：使用下面的手工分维，所有题当成一个维度。"></i>
                 <label class="mono-label" for="goalDims" style="margin:0">手工分维</label>
-                <input id="goalDims" type="text" placeholder="留空=自动；或 1201-1209|1210,1211,1212"
+                <input id="goalDims" type="text" placeholder="留空=自动"
                        style="width:230px;height:30px;padding:2px 6px;font-size:12px;border:1px solid #ddd;border-radius:6px">
                 <i class="fa fa-question-circle help-icon" aria-hidden="true"
-                   data-tip="想把一道矩阵题拆成两个维度时用。竖线分隔维度、逗号分隔项目、可用 a-b 表示范围，如 1201-1209|1210,1211,1212|1401-1404|1501-1504。填了就按这里分组，留空才用「自动分维」。"></i>
+                   data-tip="想把一道矩阵题拆成两个维度时用。竖线分隔维度、逗号分隔项目、可用 a-b 表示范围。留空=自动分维；勾选「自动分维」时本项隐藏。"></i>
             </span>
         </div>
 
@@ -654,8 +652,8 @@
 <script src="/static/js/api.js"></script>
 <script src="/static/js/alert.js"></script>
 <script src="/static/js/probability-validator.js?v=20261106i"></script>
-<script src="/static/js/answers-csv.js?v=20261116a"></script>
-    <script src="/static/js/goal-panel.js?v=20261106i"></script>
+<script src="/static/js/answers-csv.js?v=20261119a"></script>
+    <script src="/static/js/goal-panel.js?v=20261119a"></script>
     <script src="/static/js/analysis.js"></script>
 <!-- 软件自带确认框（含桌面端关窗钩子）：后加载以覆盖 analysis.js 内的旧版 -->
 <script src="/static/js/confirm.js"></script>
